@@ -1,0 +1,38 @@
+apiVersion: network.djkormo.github.io/v1alpha1
+kind: TrafficCheck
+metadata:
+  name: frontend-connectivity
+  namespace: default
+spec:
+  podLabels:
+    app: frontend
+  probeImage: nicolaka/netshoot:latest
+  ttlSecondsAfterFinished: 120
+  targets:
+    # - name: internal-healthz
+    #   type: KubernetesService
+    #   protocol: HTTP
+    #   host: backend-api
+    #   namespace: default
+    #   port: 8080
+    #   path: /healthz
+    #   expectedStatusCode: 200
+    #   timeoutSeconds: 3
+    - name: external-https
+      type: External
+      protocol: HTTPS
+      host: api.github.com
+      port: 443
+      path: /
+      expectedStatusCode: 200
+      timeoutSeconds: 5
+    - name: internal-self-signed
+      type: KubernetesService
+      protocol: HTTPS
+      host: kubernetes
+      namespace: default
+      port: 443
+      path: /livez
+      insecureSkipVerify: true
+      expectedStatusCode: 401
+      timeoutSeconds: 3

@@ -1,0 +1,144 @@
+package v1alpha1
+
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// TargetType distinguishes between in-cluster Services and external endpoints.
+// +kubebuilder:validation:Enum=KubernetesService;External
+type TargetType string
+
+const (
+	TargetTypeService  TargetType = "KubernetesService"
+	TargetTypeExternal TargetType = "External"
+)
+
+// ProtocolType defines the protocol for the connectivity check.
+// +kubebuilder:validation:Enum=TCP;UDP;HTTP;HTTPS
+type ProtocolType string
+
+const (
+	ProtocolTCP   ProtocolType = "TCP"
+	ProtocolUDP   ProtocolType = "UDP"
+	ProtocolHTTP  ProtocolType = "HTTP"
+	ProtocolHTTPS ProtocolType = "HTTPS"
+)
+
+type TargetEndpoint struct {
+	// Name is a human-readable identifier for this target.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Type specifies whether the target is a KubernetesService or External.
+	Type TargetType `json:"type"`
+
+	// Protocol specifies TCP, UDP, HTTP, or HTTPS.
+	// +kubebuilder:default=TCP
+	// +optional
+	Protocol ProtocolType `json:"protocol,omitempty"`
+
+	// Host is the Service name (for KubernetesService) or FQDN/IP (for External).
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+
+	// Namespace is optional; used when Type is KubernetesService (defaults to CR namespace).
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// Port to test connectivity against.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port"`
+
+	// Path is the URL path for HTTP/HTTPS checks (e.g. "/healthz"). Defaults to "/".
+	// +kubebuilder:default="/"
+	// +optional
+	Path string `json:"path,omitempty"`
+
+	// ExpectedStatusCode asserts a specific HTTP response code (e.g. 200).
+	// If 0, any 2xx or 3xx status code is treated as reachable.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=599
+	// +optional
+	ExpectedStatusCode int32 `json:"expectedStatusCode,omitempty"`
+
+	// InsecureSkipVerify skips TLS certificate verification for HTTPS targets.
+	// +optional
+	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
+
+	// TimeoutSeconds for the connection attempt.
+	// +kubebuilder:default=5
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	TimeoutSeconds int32 `json:"timeoutSeconds,omitempty"`
+}
+
+type TrafficCheckSpec struct {
+	// PodLabels are applied directly to the Job's probe pod (e.g., to match NetworkPolicies).
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
+
+	// ServiceAccountName is the optional ServiceAccount assigned to the probe pod.
+	// +optional
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
+
+	// Targets is the list of internal or external endpoints to verify.
+	// +kubebuilder:validation:MinItems=1
+	Targets []TargetEndpoint `json:"targets"`
+
+	// ProbeImage is the container image used to run connectivity checks (must include nc and curl).
+	// +kubebuilder:default="nicolaka/netshoot:latest"
+	// +optional
+	ProbeImage string `json:"probeImage,omitempty"`
+
+	// TTLSecondsAfterFinished limits the lifetime of a finished Job before Kubernetes deletes it.
+	// +kubebuilder:default=60
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+}
+
+type TargetResult struct {
+	Name        string       `json:"name"`
+	Protocol    ProtocolType `json:"protocol"`
+	Address     string       `json:"address"`
+	Reachable   bool         `json:"reachable"`
+	Message     string       `json:"message,omitempty"`
+	LastChecked metav1.Time  `json:"lastChecked"`
+}
+
+type TrafficCheckStatus struct {
+	// ObservedGeneration tracks the spec generation that produced the current results.
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+
+	// Results holds the connectivity outcome for each configured target.
+	Results []TargetResult `json:"results,omitempty"`
+
+	// Conditions represent the latest available observations of the TrafficCheck state.
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
+
+type TrafficCheck struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   TrafficCheckSpec   `json:"spec,omitempty"`
+	Status TrafficCheckStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+
+type TrafficCheckList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []TrafficCheck `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&TrafficCheck{}, &TrafficCheckList{})
+}
