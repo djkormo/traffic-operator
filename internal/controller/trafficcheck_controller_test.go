@@ -19,6 +19,7 @@ import (
 
 var _ = Describe("TrafficCheck Controller", func() {
 	const namespace = "default"
+	const defaultServiceAccount = "default"
 
 	ctx := context.Background()
 
@@ -62,10 +63,10 @@ var _ = Describe("TrafficCheck Controller", func() {
 			},
 			Spec: networkv1alpha1.TrafficCheckSpec{
 				PodLabels:               map[string]string{"app": "frontend", "tier": "web"},
-				ServiceAccountName:      "default",
+				ServiceAccountName:      defaultServiceAccount,
 				TTLSecondsAfterFinished: ptr.To(ttl),
 				Targets: []networkv1alpha1.TargetEndpoint{
-					{Name: "k8s-api", Type: networkv1alpha1.TargetTypeService, Host: "kubernetes", Namespace: "default", Port: 443, TimeoutSeconds: 3},
+					{Name: "k8s-api", Type: networkv1alpha1.TargetTypeService, Host: "kubernetes", Namespace: namespace, Port: 443, TimeoutSeconds: 3},
 					{Name: "github", Type: networkv1alpha1.TargetTypeExternal, Host: "api.github.com", Port: 443, TimeoutSeconds: 5},
 				},
 			},
@@ -93,7 +94,7 @@ var _ = Describe("TrafficCheck Controller", func() {
 		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("app", "frontend"))
 		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("tier", "web"))
 		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("traffic-operator/probe", "true"))
-		Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal("default"))
+		Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal(defaultServiceAccount))
 		Expect(job.Spec.Template.Spec.AutomountServiceAccountToken).To(Equal(ptr.To(false)))
 		Expect(job.OwnerReferences).To(HaveLen(1))
 		Expect(job.OwnerReferences[0].Name).To(Equal(crName))
@@ -231,7 +232,7 @@ var _ = Describe("TrafficCheck Controller", func() {
 						Type:               networkv1alpha1.TargetTypeService,
 						Protocol:           networkv1alpha1.ProtocolHTTPS,
 						Host:               "kubernetes",
-						Namespace:          "default",
+						Namespace:          namespace,
 						Port:               443,
 						Path:               "/livez",
 						ExpectedStatusCode: 200,
