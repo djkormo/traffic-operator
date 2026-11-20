@@ -1,3 +1,5 @@
+Look at https://djkormo.github.io/traffic-operator/
+
 # traffic-operator
 
 `traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints.
