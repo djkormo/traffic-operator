@@ -45,9 +45,40 @@ It continuously reconciles `TrafficCheck` custom resources by orchestrating ephe
 
 ## Installation via Helm
 
-The recommended way to deploy `traffic-operator` is via the provided Helm chart in [`charts/traffic-operator`](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator).
+The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-pages` branch) at:
+**`https://djkormo.github.io/traffic-operator`**
 
-### Install the Chart
+### Option 1: Install from GitHub Pages Repository (Recommended)
+
+1. **Add the Helm chart repository**:
+   ```bash
+   helm repo add traffic-operator https://djkormo.github.io/traffic-operator
+   helm repo update
+   ```
+
+2. **Search for available versions**:
+   ```bash
+   helm search repo traffic-operator
+   ```
+
+3. **Install the operator**:
+   ```bash
+   helm install traffic-operator traffic-operator/traffic-operator \
+     --namespace traffic-operator-system \
+     --create-namespace
+   ```
+
+4. **(Optional) Install or upgrade with custom values**:
+   ```bash
+   helm upgrade --install traffic-operator traffic-operator/traffic-operator \
+     --namespace traffic-operator-system \
+     --create-namespace \
+     -f my-values.yaml
+   ```
+
+### Option 2: Install from Local Chart Directory
+
+If you cloned this repository locally, you can install directly from the [`charts/traffic-operator`](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator) directory:
 
 ```bash
 helm install traffic-operator ./charts/traffic-operator \
@@ -58,10 +89,10 @@ helm install traffic-operator ./charts/traffic-operator \
 ### Verify Deployment
 
 ```bash
-kubectl get pods -n traffic-operator-system
+kubectl get pods -n traffic-operator-system -l control-plane=controller-manager
 ```
 
-For full Helm chart configuration options, see the [Chart README](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator/README.md).
+For full Helm chart configuration options and values reference, see the [Chart README](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator/README.md).
 
 ---
 
