@@ -1,0 +1,72 @@
+{{- if and .Values.rbac.create .Values.rbac.userRoles.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "traffic-operator.fullname" . }}-trafficcheck-admin
+  labels:
+    {{- include "traffic-operator.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+- apiGroups:
+  - network.djkormo.github.io
+  resources:
+  - trafficchecks
+  verbs:
+  - '*'
+- apiGroups:
+  - network.djkormo.github.io
+  resources:
+  - trafficchecks/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "traffic-operator.fullname" . }}-trafficcheck-editor
+  labels:
+    {{- include "traffic-operator.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+rules:
+- apiGroups:
+  - network.djkormo.github.io
+  resources:
+  - trafficchecks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - network.djkormo.github.io
+  resources:
+  - trafficchecks/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "traffic-operator.fullname" . }}-trafficcheck-viewer
+  labels:
+    {{- include "traffic-operator.labels" . | nindent 4 }}
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+rules:
+- apiGroups:
+  - network.djkormo.github.io
+  resources:
+  - trafficchecks
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - network.djkormo.github.io
+  resources:
+  - trafficchecks/status
+  verbs:
+  - get
+{{- end }}

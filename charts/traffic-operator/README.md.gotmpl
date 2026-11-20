@@ -1,0 +1,128 @@
+{{ template "chart.header" . }}
+{{ template "chart.deprecationWarning" . }}
+
+{{ template "chart.badgesSection" . }}
+
+{{ template "chart.description" . }}
+
+{{ template "chart.homepageLine" . }}
+
+## Overview
+
+`traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints. It continuously reconciles `TrafficCheck` custom resources by orchestrating ephemeral probe jobs and reporting target reachability directly in the resource status.
+
+### Features
+
+- **Automated Connectivity Checks**: Verify TCP, UDP, HTTP, and HTTPS endpoints.
+- **In-Cluster & External Targets**: Test internal Kubernetes Services as well as external FQDNs / IPs.
+- **Status Reporting**: Aggregates target latency, status codes, and overall reachability condition (`AllTargetsReachable` / `TargetsUnreachable`).
+- **Security First**: Runs adhering to the Kubernetes `restricted` Pod Security Standard (non-root, read-only root filesystem, dropped capabilities).
+- **Prometheus Metrics**: Built-in metrics service and optional `ServiceMonitor` integration.
+- **RBAC Aggregate Roles**: Provides out-of-the-box `admin`, `editor`, and `viewer` ClusterRoles.
+
+{{ template "chart.sourcesSection" . }}
+
+{{ template "chart.requirementsSection" . }}
+
+## Prerequisites
+
+- Kubernetes 1.26+
+- Helm 3.8.0+
+
+## Installing the Chart
+
+### Option 1: From the Helm Repository (GitHub Pages)
+
+The `traffic-operator` chart is hosted via GitHub Pages on the `gh-pages` branch:
+
+```bash
+helm repo add traffic-operator https://djkormo.github.io/traffic-operator
+helm repo update
+
+helm install traffic-operator traffic-operator/traffic-operator \
+  --namespace traffic-operator-system \
+  --create-namespace
+```
+
+### Option 2: From Local Source
+
+```bash
+helm install traffic-operator ./charts/traffic-operator \
+  --namespace traffic-operator-system \
+  --create-namespace
+```
+
+### Custom Resource Definitions (CRDs)
+
+Helm automatically installs CRDs located in the `crds/` directory during initial chart installation. If you manage CRDs separately or use GitOps tools such as ArgoCD, you can apply the CRD manually:
+
+```bash
+kubectl apply -f charts/traffic-operator/crds/network.djkormo.github.io_trafficchecks.yaml
+```
+
+### Verify Installation
+
+```bash
+kubectl get pods -n traffic-operator-system -l control-plane=controller-manager
+```
+
+## Usage Example
+
+Create a `TrafficCheck` resource to verify connectivity to both an external API and an internal service:
+
+```yaml
+apiVersion: network.djkormo.github.io/v1alpha1
+kind: TrafficCheck
+metadata:
+  name: example-check
+  namespace: default
+spec:
+  podLabels:
+    app: example-probe
+  probeImage: nicolaka/netshoot:latest
+  ttlSecondsAfterFinished: 120
+  targets:
+    - name: external-github
+      type: External
+      protocol: HTTPS
+      host: api.github.com
+      port: 443
+      path: /
+      expectedStatusCode: 200
+      timeoutSeconds: 5
+    - name: internal-kubernetes-api
+      type: KubernetesService
+      protocol: HTTPS
+      host: kubernetes
+      namespace: default
+      port: 443
+      path: /livez
+      insecureSkipVerify: true
+      expectedStatusCode: 401
+      timeoutSeconds: 3
+```
+
+Check the results:
+
+```bash
+kubectl get trafficcheck example-check -o wide
+kubectl describe trafficcheck example-check
+```
+
+## Uninstalling the Chart
+
+To uninstall the `traffic-operator` release:
+
+```bash
+helm uninstall traffic-operator --namespace traffic-operator-system
+```
+
+> [!NOTE]
+> Custom Resource Definitions (CRDs) are not deleted by Helm on chart uninstallation to prevent accidental data loss. To remove them manually:
+> ```bash
+> kubectl delete crd trafficchecks.network.djkormo.github.io
+> ```
+
+{{ template "chart.valuesSection" . }}
+
+{{ template "chart.maintainersSection" . }}
