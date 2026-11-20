@@ -1,5 +1,30 @@
+export PATH := /usr/local/go/bin:$(PATH)
+
+dpl ?= deploy.env
+include $(dpl)
+export $(shell sed 's/=.*//' $(dpl))
+
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
+ENVTEST_K8S_VERSION = 1.34.0
+
+COMMIT?=$(shell git rev-parse --short HEAD)
+BUILD_TIME?=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
+PROJECT?=github.com/djkormo/traffic-operator
+
+# Trivy severity level and output format
+TRIVY_SEVERITY ?= CRITICAL,HIGH,MEDIUM,LOW #,UNKNOWN
+TRIVY_FORMAT ?= table
+
+# acorrding to https://github.com/kubernetes-sigs/kubebuilder/issues/4079
+
+# Variables
+KUBEBUILDER_VERSION ?= v4.6.0 # Change to the desired version
+KUBEBUILDER_REPO = https://github.com/kubernetes-sigs/kubebuilder.git
+KUBEBUILDER_DIR = kubebuilder
+KUBEBUILDER_BIN = /usr/local/bin/kubebuilder
+
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -100,22 +125,78 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+#	go build -o bin/manager cmd/main.go
+	CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build  \
+		-ldflags "-s -w -X ${PROJECT}/version.Release=${VERSION} \
+		-X ${PROJECT}/version.Commit=${COMMIT} -X ${PROJECT}/version.BuildTime=${BUILD_TIME}" \
+		-o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+	go run -ldflags "-s -w -X ${PROJECT}/version.Release=${VERSION} \
+		-X ${PROJECT}/version.Commit=${COMMIT} -X ${PROJECT}/version.BuildTime=${BUILD_TIME}" \
+	   cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	$(CONTAINER_TOOL) build -t ${IMG} .
+	$(CONTAINER_TOOL)  build -t $(APP_NAME) . --progress=plain --build-arg VERSION=${VERSION} --build-arg  COMMIT=${COMMIT} --build-arg BUILD_TIME=${BUILD_TIME} --build-arg PROJECT=${PROJECT}
+
+
+.PHONY: docker-build-nc
+docker-build-nc: ## Build docker image with the manager.
+	$(CONTAINER_TOOL)  build --no-cache -t $(APP_NAME) . --progress=plain --build-arg VERSION=${VERSION} --build-arg  COMMIT=${COMMIT} --build-arg BUILD_TIME=${BUILD_TIME} --build-arg PROJECT=${PROJECT}
+
+# Docker publish
+.PHONY: docker-publish
+docker-publish: docker-repo-login docker-publish-latest docker-publish-version ## Publish the `{version}` and `latest` tagged containers to remote repo
+
+.PHONY: docker-publish-latest
+docker-publish-latest: docker-tag-latest ## Publish the `latest` taged container to ECR
+	@echo 'publish latest to $(DOCKER_REPO)'
+	$(CONTAINER_TOOL)  push $(DOCKER_REPO)/$(APP_NAME):latest
+
+.PHONY: docker-publish-version
+docker-publish-version: docker-tag-version ## Publish the `{version}` taged container to ECR
+	@echo 'publish $(VERSION) to $(DOCKER_REPO)'
+	$(CONTAINER_TOOL)  push $(DOCKER_REPO)/$(APP_NAME):$(VERSION)
+
+# Docker tagging
+.PHONY: docker-tag
+docker-tag: docker-tag-latest docker-tag-version ## Generate container tags for the `{version}` ans `latest` tags
+
+.PHONY: docker-tag-latest
+docker-tag-latest: ## Generate container `{version}` tag
+	@echo 'create tag latest'
+	$(CONTAINER_TOOL)  tag $(APP_NAME) $(DOCKER_REPO)/$(APP_NAME):latest
+
+.PHONY: docker-tag-versaion
+docker-tag-version: ## Generate container `latest` tag
+	@echo 'create tag $(VERSION)'
+	$(CONTAINER_TOOL)  tag $(APP_NAME) $(DOCKER_REPO)/$(APP_NAME):$(VERSION)
+
+
+.PHONY: docker-inspect
+docker-inspect: ## Generate container `latest` tag
+	@echo 'inspect $(APP_NAME)'
+	$(CONTAINER_TOOL)  history $(APP_NAME)
+	$(CONTAINER_TOOL)  inspect $(APP_NAME)
+
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+
+.PHONY: docker-repo-login
+docker-repo-login: ## Login to repo
+	$(CONTAINER_TOOL) login	
+
+.PHONY: docker-system-prune
+docker-system-prune: ## Prune images
+	$(CONTAINER_TOOL) system prune	
 
 # PLATFORMS defines the target platforms for the manager image be built to provide support to multiple
 # architectures. (i.e. make docker-buildx IMG=myregistry/mypoperator:0.0.1). To use this option you need to:
@@ -163,6 +244,35 @@ deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in
 undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | $(KUBECTL) delete --ignore-not-found=$(ignore-not-found) -f -
 
+##@ Helm
+
+.PHONY: helm-update-crds
+helm-update-crds: manifests ## Generate and update CRDs in the Helm chart from config/crd/bases.
+	@echo "Updating CRDs in charts/traffic-operator/crds/..."
+	mkdir -p charts/traffic-operator/crds
+	cp config/crd/bases/*.yaml charts/traffic-operator/crds/
+	@echo "CRDs successfully updated."
+
+.PHONY: helm-crds
+helm-crds: helm-update-crds ## Alias for helm-update-crds.
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart.
+	$(HELM) lint charts/traffic-operator
+
+.PHONY: helm-template
+helm-template: ## Render the Helm chart templates.
+	$(HELM) template $(APP_NAME) charts/traffic-operator
+
+.PHONY: helm-docs
+helm-docs: ## Generate Helm documentation with helm-docs.
+	$(HELM_DOCS) -c charts/traffic-operator --sort-values-order file
+
+.PHONY: helm-package
+helm-package: ## Package the Helm chart into dist/.
+	mkdir -p dist
+	$(HELM) package charts/traffic-operator -d dist/
+
 ##@ Dependencies
 
 ## Location to install dependencies to
@@ -177,6 +287,8 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+HELM ?= $(LOCALBIN)/helm
+HELM_DOCS ?= helm-docs
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
@@ -213,7 +325,17 @@ $(ENVTEST): $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,${GOLANGCI_LINT_VERSION})
+
+.PHONY: trivy-scan ## Use trivy scan
+trivy-scan:
+	trivy image $(DOCKER_REPO)/$(APP_NAME):$(VERSION) \
+		--severity $(TRIVY_SEVERITY) \
+		--exit-code 1 \
+		--format $(TRIVY_FORMAT) \
+		--skip-dirs vendor \
+		--scanners vuln
+
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
