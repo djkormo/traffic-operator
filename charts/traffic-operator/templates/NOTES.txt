@@ -1,0 +1,31 @@
+traffic-operator has been installed.
+
+1. Check operator pod status:
+  kubectl get pods -n {{ .Release.Namespace }} -l {{ include "traffic-operator.selectorLabels" . | replace ": " "=" | replace "\n" "," | trimSuffix "," }}
+
+2. View operator logs:
+  kubectl logs -n {{ .Release.Namespace }} -l {{ include "traffic-operator.selectorLabels" . | replace ": " "=" | replace "\n" "," | trimSuffix "," }} -c manager -f
+
+{{- if .Values.metrics.enabled }}
+3. Check metrics endpoint:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "traffic-operator.fullname" . }}-metrics {{ .Values.metrics.service.port }}:{{ .Values.metrics.service.port }}
+{{- end }}
+
+4. Create a sample TrafficCheck Custom Resource:
+  cat <<EOF | kubectl apply -f -
+  apiVersion: network.djkormo.github.io/v1alpha1
+  kind: TrafficCheck
+  metadata:
+    name: sample-check
+    namespace: default
+  spec:
+    targets:
+      - name: external-https
+        type: External
+        protocol: HTTPS
+        host: api.github.com
+        port: 443
+        path: /
+        expectedStatusCode: 200
+        timeoutSeconds: 5
+  EOF

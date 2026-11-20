@@ -1,0 +1,199 @@
+# Default values for traffic-operator.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Number of replicas for the traffic-operator deployment
+replicaCount: 1
+
+image:
+  # -- Image repository for traffic-operator
+  repository: djkormo/traffic-operator
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+  # -- Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+# -- Image pull secrets for private container registries
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+
+# -- Override the full chart name
+fullnameOverride: ""
+
+# -- Common labels to apply to all resources
+commonLabels: {}
+
+# -- Annotations to apply to the Deployment
+deploymentAnnotations: {}
+
+# -- Annotations to apply to operator pods
+podAnnotations: {}
+
+# -- Labels to apply to operator pods
+podLabels: {}
+
+# -- Pod-level security context adheres to the "restricted" Pod Security Standard
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Termination grace period in seconds
+terminationGracePeriodSeconds: 10
+
+# -- Optional priority class name for operator pod
+priorityClassName: ""
+
+serviceAccount:
+  # -- Specifies whether a service account should be created
+  create: true
+  # -- Automatically mount service account token in pod
+  automount: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- The name of the service account to use. If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+leaderElection:
+  # -- Enable leader election for the operator controller manager
+  enabled: true
+
+probe:
+  # -- Enable health check probes
+  enabled: true
+  # -- Port for health probes (:8081)
+  port: 8081
+
+# -- Liveness probe configuration
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8081
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+# -- Readiness probe configuration
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 8081
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+logging:
+  # -- Zap log level (debug, info, error)
+  logLevel: info
+  # -- Zap encoder (json, console)
+  encoder: console
+  # -- Development mode for logger (more verbose stacktraces)
+  development: false
+
+metrics:
+  # -- Enable metrics endpoint
+  enabled: true
+  # -- Port for metrics endpoint (:8443)
+  port: 8443
+  service:
+    # -- Metrics service type
+    type: ClusterIP
+    # -- Metrics service port
+    port: 8443
+    # -- Additional labels for metrics service
+    labels: {}
+    # -- Additional annotations for metrics service
+    annotations: {}
+  serviceMonitor:
+    # -- Enable Prometheus ServiceMonitor
+    enabled: false
+    # -- ServiceMonitor namespace (defaults to release namespace)
+    namespace: ""
+    # -- Scrape interval
+    interval: 30s
+    # -- Scrape timeout
+    scrapeTimeout: 10s
+    # -- Honor labels
+    honorLabels: false
+    # -- Additional labels for the ServiceMonitor
+    labels: {}
+    # -- Additional annotations for the ServiceMonitor
+    annotations: {}
+    tlsConfig:
+      # -- Skip TLS verification for metrics scraping (default true unless cert-manager is configured)
+      insecureSkipVerify: true
+      # -- TLS server name
+      serverName: ""
+      # -- CA secret reference (optional)
+      caSecret: {}
+        # name: ""
+        # key: ""
+    # -- Metric relabelings
+    metricRelabelings: []
+    # -- Relabelings
+    relabelings: []
+
+networkPolicy:
+  # -- Enable NetworkPolicy to restrict access to operator metrics
+  enabled: false
+  # -- Annotations for NetworkPolicy
+  annotations: {}
+  # -- Ingress rules for the NetworkPolicy
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              metrics: enabled
+      ports:
+        - port: 8443
+          protocol: TCP
+
+rbac:
+  # -- Specifies whether RBAC resources should be created
+  create: true
+  # -- Extra RBAC rules to append to the manager ClusterRole
+  extraRules: []
+  userRoles:
+    # -- Create TrafficCheck Admin, Editor, and Viewer ClusterRoles
+    create: true
+  metricsAuth:
+    # -- Enable RBAC for metrics tokenreviews and subjectaccessreviews
+    enabled: false
+
+# -- Resource limits and requests for the operator container
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# -- Node labels for pod assignment
+nodeSelector: {}
+
+# -- Node tolerations for pod assignment
+tolerations: []
+
+# -- Node affinity for pod assignment
+affinity: {}
+
+# -- Extra command line arguments for the operator container
+extraArgs: []
+
+# -- Extra environment variables for the operator container
+env: []
+
+# -- Additional volume mounts for the operator container
+volumeMounts: []
+
+# -- Additional volumes for the operator pod
+volumes: []
