@@ -134,6 +134,9 @@ type TargetResult struct {
 }
 
 type TrafficCheckStatus struct {
+	// JobGeneration tracks the spec generation for which a probe Job was created.
+	JobGeneration int64 `json:"jobGeneration,omitempty"`
+
 	// ObservedGeneration tracks the spec generation that produced the current results.
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
 

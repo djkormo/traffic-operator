@@ -1,0 +1,43 @@
+apiVersion: network.djkormo.github.io/v1alpha1
+kind: TrafficCheck
+metadata:
+  name: external-connectivity
+  namespace: default
+  annotations:
+    # Annotation to stop/pause reconciliation on this TrafficCheck resource:
+    # network.djkormo.github.io/stop-reconcile: "true"
+    #
+    # Annotation to trigger an on-demand re-reconciliation:
+    # network.djkormo.github.io/re-run: "true"
+spec:
+  podLabels:
+    app: frontend
+  probeImage: nicolaka/netshoot:latest
+  ttlSecondsAfterFinished: 120
+  targets:
+    # - name: internal-healthz
+    #   type: KubernetesService
+    #   protocol: HTTP
+    #   host: backend-api
+    #   namespace: default
+    #   port: 8080
+    #   path: /healthz
+    #   expectedStatusCode: 200
+    #   timeoutSeconds: 3
+    - name: external-https
+      type: External
+      protocol: HTTPS
+      host: api.github.com
+      port: 443
+      path: /
+      expectedStatusCode: 200
+      timeoutSeconds: 5
+    - name: google-dns
+      type: External
+      protocol: UDP
+      host: 8.8.8.8
+      namespace: default
+      port: 53
+      insecureSkipVerify: true
+      expectedStatusCode: 401
+      timeoutSeconds: 3

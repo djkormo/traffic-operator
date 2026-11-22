@@ -381,6 +381,36 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			Expect(res.RequeueAfter).To(Equal(3 * time.Second))
 		})
 
+		It("does not recreate a manually deleted running job", func() {
+			crName := "check-job-manual-delete"
+			tc := &networkv1alpha1.TrafficCheck{
+				ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unitNamespace},
+				Spec: networkv1alpha1.TrafficCheckSpec{
+					Targets: []networkv1alpha1.TargetEndpoint{{Name: "t1", Type: networkv1alpha1.TargetTypeExternal, Host: testExampleHost, Port: 80}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, tc)).To(Succeed())
+			defer func() { _ = k8sClient.Delete(ctx, tc) }()
+
+			r := newReconciler("")
+			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: unitNamespace}}
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			jobName := fmt.Sprintf("traffic-probe-%s-g1", crName)
+			var job batchv1.Job
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: unitNamespace}, &job)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground))).To(Succeed())
+			Eventually(func() bool {
+				return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: unitNamespace}, &job))
+			}).Should(BeTrue())
+
+			res, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(res.RequeueAfter).To(BeZero())
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: unitNamespace}, &job))).To(BeTrue())
+		})
+
 		It("requeues when probe Job is in the process of being deleted", func() {
 			crName := "check-job-deleting"
 			tc := &networkv1alpha1.TrafficCheck{
@@ -493,7 +523,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			Expect(err).To(MatchError("simulated log read failure"))
 		})
 
-		It("requeues when cooldown period is active after job deletion", func() {
+		It("does not recreate a completed job after deletion", func() {
 			crName := "check-cooldown"
 			tc := &networkv1alpha1.TrafficCheck{
 				ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: unitNamespace},
@@ -521,8 +551,10 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 
 			res, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(res.RequeueAfter).To(BeNumerically(">", 0))
-			Expect(res.RequeueAfter).To(BeNumerically("<=", 5*time.Second))
+			Expect(res.RequeueAfter).To(BeZero())
+
+			var job batchv1.Job
+			Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: "traffic-probe-" + crName + "-g1", Namespace: unitNamespace}, &job))).To(BeTrue())
 		})
 
 		It("handles AlreadyExists and generic error on Job creation", func() {
@@ -608,17 +640,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			Expect(k8sClient.Create(ctx, tc)).To(Succeed())
 			defer func() { _ = k8sClient.Delete(ctx, tc) }()
 
-			hookCl := customHookClient{
-				Client:    k8sClient,
-				statusErr: fmt.Errorf("simulated status failure"),
-			}
-			r := &TrafficCheckReconciler{
-				Client: hookCl,
-				Scheme: k8sClient.Scheme(),
-				LogReader: func(ctx context.Context, ns, podName string) (string, error) {
-					return "RESULT|t1|TCP|example.com:80|PASS|ok\n", nil
-				},
-			}
+			r := newReconciler("RESULT|t1|TCP|example.com:80|PASS|ok\n")
 			req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: unitNamespace}}
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
@@ -643,6 +665,11 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			job.Status.Succeeded = 1
 			Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
 
+			hookCl := customHookClient{
+				Client:    k8sClient,
+				statusErr: fmt.Errorf("simulated status failure"),
+			}
+			r.Client = hookCl
 			_, err = r.Reconcile(ctx, req)
 			Expect(err).To(MatchError("simulated status failure"))
 		})

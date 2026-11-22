@@ -200,6 +200,11 @@ spec:
                   - type
                   type: object
                 type: array
+              jobGeneration:
+                description: JobGeneration tracks the spec generation for which a
+                  probe Job was created.
+                format: int64
+                type: integer
               observedGeneration:
                 description: ObservedGeneration tracks the spec generation that produced
                   the current results.
