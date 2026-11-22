@@ -1,5 +1,8 @@
 # traffic-operator
 
+> **🚀 Latest release: Helm chart `0.2.0` (appVersion `0.0.2`) — [release notes](#helm-chart-changelog)**
+
+
 `traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints.
 
 It continuously reconciles `TrafficCheck` custom resources by orchestrating ephemeral probe jobs and reporting target reachability directly in the resource status.
@@ -48,6 +51,8 @@ It continuously reconciles `TrafficCheck` custom resources by orchestrating ephe
 The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-pages` branch) at:
 **`https://djkormo.github.io/traffic-operator`**
 
+> **Latest available chart version: `0.2.0`** (appVersion `0.0.2`)
+
 ### Option 1: Install from GitHub Pages Repository (Recommended)
 
 1. **Add the Helm chart repository**:
@@ -61,14 +66,22 @@ The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-
    helm search repo traffic-operator
    ```
 
-3. **Install the operator**:
+3. **Install the operator** (latest `0.2.0`):
    ```bash
    helm install traffic-operator traffic-operator/traffic-operator \
      --namespace traffic-operator-system \
      --create-namespace
    ```
 
-4. **(Optional) Install or upgrade with custom values**:
+4. **Install a specific version**:
+   ```bash
+   helm install traffic-operator traffic-operator/traffic-operator \
+     --namespace traffic-operator-system \
+     --create-namespace \
+     --version 0.2.0
+   ```
+
+5. **(Optional) Install or upgrade with custom values**:
    ```bash
    helm upgrade --install traffic-operator traffic-operator/traffic-operator \
      --namespace traffic-operator-system \
@@ -162,3 +175,25 @@ kubectl describe trafficcheck connectivity-check
 | `make helm-template` | Render the Helm templates |
 | `make helm-docs` | Regenerate Helm documentation using `helm-docs` |
 | `make helm-package` | Package the Helm chart into `dist/` |
+
+---
+
+## Helm Chart Changelog
+
+### 0.2.0 (2026-11-22)
+
+- **Operator appVersion**: `0.0.2`
+- Added `version` package exposing `Application`, `Release`, `Commit`, and `BuildTime` build metadata
+- Operator startup log now includes full build information
+- Expanded RBAC roles: added permissions for `events`, `pods/log`, `batch/jobs`
+- Improved controller reconciliation: probe job lifecycle management, re-run annotation support, and stop-reconcile annotation support
+- Extended `TrafficCheck` CRD status with per-target `TargetResult` including latency, reachability and last-checked timestamp
+- Helm chart values extended with `podAnnotations`, `podLabels`, resource limit/request tuning
+- Download: [`traffic-operator-0.2.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.2.0/traffic-operator-0.2.0.tgz)
+
+### 0.1.0
+
+- Initial Helm chart release
+- appVersion `0.0.1`
+- Basic `TrafficCheck` CRD and controller deployment
+- Download: [`traffic-operator-0.1.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.1.0/traffic-operator-0.1.0.tgz)
