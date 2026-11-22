@@ -64,6 +64,11 @@ spec:
                   to verify.
                 items:
                   properties:
+                    access:
+                      default: true
+                      description: Access is the expected connectivity outcome. False
+                        asserts that traffic is blocked.
+                      type: boolean
                     expectedStatusCode:
                       description: |-
                         ExpectedStatusCode asserts a specific HTTP response code (e.g. 200).
