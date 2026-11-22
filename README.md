@@ -40,7 +40,7 @@ It continuously reconciles `TrafficCheck` custom resources by orchestrating ephe
 1. **User creates a `TrafficCheck` CR** defining targets (internal Kubernetes services or external endpoints).
 2. **`traffic-operator` reconciles the CR** and spins up a targeted probe Job using a lightweight networking container (`nicolaka/netshoot` by default).
 3. **Probe executes checks**: Supports TCP port connectivity, UDP, HTTP, and HTTPS endpoints with status code assertion and TLS verification controls.
-4. **Operator updates CR status**: Collects results (latency, status codes, failure messages) and sets the `Ready` condition (`AllTargetsReachable` or `TargetsUnreachable`).
+4. **Operator updates CR status**: Collects results (status codes and failure messages) and sets `Ready=True` when every target matches its expected access (`AllTargetsMatched`), or `Ready=False` when one or more expectations fail (`AccessExpectationFailed`).
 5. **Job cleanup**: Ephemeral jobs and pods are automatically cleaned up via Kubernetes `ttlSecondsAfterFinished`.
 
 ---
@@ -122,17 +122,25 @@ kubectl get trafficcheck connectivity-check
 kubectl describe trafficcheck connectivity-check
 ```
 
-Set `access: false` on a target to assert that the probe cannot reach it. The `Ready` condition is true when the observed result matches each target's expected `access` value; `.status.results[].reachable` continues to report the observed connectivity. Omitting `access` defaults to `true`.
+Set `access: false` on a target to assert that the probe cannot reach it. The `Ready` condition is true when the observed result matches each target's expected `access` value; `.status.results[].reachable` continues to report observed connectivity. Thus, a correctly blocked target has `reachable: false` while the `TrafficCheck` can still be `Ready=True`. Omitting `access` defaults to `true`.
+
+`access` is an expectation only: the operator creates probe Jobs and reports results, but does not create or enforce NetworkPolicies. Configure a policy separately so it selects the probe pod. The labels under `spec.podLabels` are applied to that pod and should match the policy's pod selector. For service targets, ensure DNS is allowed when the probe uses a service hostname; otherwise a DNS failure can also appear as unreachable.
 
 ```yaml
-targets:
-  - name: blocked-database
-    type: KubernetesService
-    host: database
-    namespace: production
-    port: 5432
-    access: false
+spec:
+  podLabels:
+    app: frontend
+  targets:
+    - name: blocked-database
+      type: KubernetesService
+      protocol: TCP
+      host: database
+      namespace: production
+      port: 5432
+      access: false
 ```
+
+The deny example is also available as [`config/samples/network_v1alpha1_trafficcheck_deny.yaml`](config/samples/network_v1alpha1_trafficcheck_deny.yaml). It assumes your cluster has a policy that blocks the selected probe pod from reaching the database.
 
 ---
 
@@ -155,30 +163,19 @@ While reconciliation is stopped, the operator skips probe job creation and logs 
 
 ### Reconciling TrafficCheck After Jobs are Completed and Deleted
 
-When a probe Job finishes, its results are recorded in the `TrafficCheck.status`. Kubernetes cleans up the Job and its Pod after `ttlSecondsAfterFinished` has elapsed.
+When a probe Job finishes, its results are recorded in the `TrafficCheck.status`. Kubernetes cleans up the Job and its Pod after `ttlSecondsAfterFinished` has elapsed. The controller does not automatically recreate a Job for the same spec generation after the Job is deleted, either manually or by TTL cleanup.
 
-You can reconcile the `TrafficCheck` resource through any of the following methods:
+To run another probe, use one of these methods:
 
-1. **Automatic Reconciliation after Job Deletion**:
-   Once the completed Job is deleted (either automatically via `ttlSecondsAfterFinished` or manually via `kubectl delete job`), the operator automatically reconciles and runs a fresh connectivity probe, as long as reconciliation is not stopped by annotation.
-
-2. **Resume Reconciliation (Remove Stop Annotation)**:
-   If reconciliation was previously stopped via annotation, remove the annotation to resume:
-   ```bash
-   kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/stop-reconcile-
-   ```
-
-3. **On-Demand Re-run via Annotation**:
-   To immediately trigger a fresh probe without waiting:
+1. **On-demand re-run**: Set the re-run annotation. If the current Job still exists, the controller deletes it and then creates a replacement Job for the current generation.
    ```bash
    kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/re-run="true" --overwrite
    ```
-   If an existing probe Job exists, the operator will remove it and launch a new check.
+2. **Change the spec**: Updating the `TrafficCheck` spec creates a probe for the new generation, provided reconciliation is not paused.
 
-4. **Manual Job Deletion**:
-   Deleting the current probe Job triggers an immediate re-reconciliation:
+Deleting a Job manually only removes that Job; it does not request another probe. Removing a stop or pause annotation resumes reconciliation but does not by itself rerun a Job that was already deleted. To remove a probe Job manually:
    ```bash
-   kubectl delete job -l traffic-operator/probe=true
+  kubectl delete job traffic-probe-connectivity-check-g1 -n default
    ```
 
 ---

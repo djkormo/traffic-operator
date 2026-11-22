@@ -5,9 +5,23 @@ on:
   push:
     branches-ignore:
       - 'gh-pages'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'go.work'
+      - 'go.work.sum'
+      - '.golangci.yml'
   pull_request:
     branches-ignore:
       - 'gh-pages'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'go.work'
+      - 'go.work.sum'
+      - '.golangci.yml'
 
 jobs:
   lint:
