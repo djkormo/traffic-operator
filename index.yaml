@@ -7,6 +7,36 @@ entries:
       artifacthub.io/operator: "true"
       artifacthub.io/prerelease: "false"
     apiVersion: v2
+    appVersion: 0.0.3
+    created: "2026-11-22T19:41:18.317111529Z"
+    description: A Helm chart for traffic-operator, a Kubernetes Operator for automated
+      network connectivity validation
+    digest: eb9d824967dc5a1f86a7acc2ae4695148f67f936b980f17449ddf7afd520a378
+    home: https://github.com/djkormo/traffic-operator
+    icon: https://raw.githubusercontent.com/djkormo/traffic-operator/master/docs/icon.png
+    keywords:
+    - traffic-operator
+    - kubernetes
+    - networking
+    - connectivity
+    - probe
+    - operator
+    maintainers:
+    - name: djkormo
+      url: https://github.com/djkormo
+    name: traffic-operator
+    sources:
+    - https://github.com/djkormo/traffic-operator
+    type: application
+    urls:
+    - https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.3.0/traffic-operator-0.3.0.tgz
+    version: 0.3.0
+  - annotations:
+      artifacthub.io/category: networking
+      artifacthub.io/license: Apache-2.0
+      artifacthub.io/operator: "true"
+      artifacthub.io/prerelease: "false"
+    apiVersion: v2
     appVersion: 0.0.2
     created: "2026-11-22T16:25:49.845556099Z"
     description: A Helm chart for traffic-operator, a Kubernetes Operator for automated
@@ -61,4 +91,4 @@ entries:
     urls:
     - https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.1.0/traffic-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2026-11-22T16:25:49.8455632Z"
+generated: "2026-11-22T19:41:18.317119982Z"
