@@ -23,6 +23,11 @@ import (
 	networkv1alpha1 "github.com/djkormo/traffic-operator/api/v1alpha1"
 )
 
+const (
+	strTrue = "true"
+	strYes  = "yes"
+)
+
 type TrafficCheckReconciler struct {
 	client.Client
 	Scheme    *runtime.Scheme
@@ -31,11 +36,12 @@ type TrafficCheckReconciler struct {
 	LogReader func(ctx context.Context, namespace, podName string) (string, error)
 }
 
-// +kubebuilder:rbac:groups=network.example.com,resources=trafficchecks,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=network.example.com,resources=trafficchecks/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=network.djkormo.github.io,resources=trafficchecks,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=network.djkormo.github.io,resources=trafficchecks/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
 func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
@@ -45,8 +51,9 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Skip if this spec generation has already been evaluated.
-	if tc.Status.ObservedGeneration == tc.Generation && len(tc.Status.Results) > 0 {
+	// 1. Check if reconciliation is stopped via annotation.
+	if isReconciliationStopped(&tc) {
+		logger.Info("Reconciliation is stopped via annotation", "trafficcheck", tc.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -54,8 +61,32 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	var existingJob batchv1.Job
 	err := r.Get(ctx, client.ObjectKey{Namespace: tc.Namespace, Name: jobName}, &existingJob)
 
-	// 1. Create the probe Job if it does not exist.
+	// Check if an on-demand re-run was requested via annotation.
+	if isReRunRequested(&tc) {
+		if err == nil {
+			logger.Info("Re-run requested via annotation; deleting existing probe job", "job", jobName)
+			if delErr := r.Delete(ctx, &existingJob, client.PropagationPolicy(metav1.DeletePropagationBackground)); delErr != nil && !apierrors.IsNotFound(delErr) {
+				return ctrl.Result{}, delErr
+			}
+			return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+		}
+		// Clear re-run annotation once job is gone or being created
+		if tc.Annotations != nil && tc.Annotations[networkv1alpha1.AnnotationReRun] == strTrue {
+			delete(tc.Annotations, networkv1alpha1.AnnotationReRun)
+			if updateErr := r.Update(ctx, &tc); updateErr != nil {
+				return ctrl.Result{}, updateErr
+			}
+		}
+	}
+
+	// 2. Create the probe Job if it does not exist (initial run or after previous job was deleted).
 	if apierrors.IsNotFound(err) {
+		// Minimum cooldown of 5s between automatic re-runs of the same generation if previous results exist (prevents tight looping if TTL=0)
+		if tc.Status.ObservedGeneration == tc.Generation && len(tc.Status.Results) > 0 && time.Since(tc.Status.Results[0].LastChecked.Time) < 5*time.Second {
+			requeueIn := 5*time.Second - time.Since(tc.Status.Results[0].LastChecked.Time)
+			return ctrl.Result{RequeueAfter: requeueIn}, nil
+		}
+
 		job := r.buildProbeJob(&tc, jobName)
 		if err := ctrl.SetControllerReference(&tc, job, r.Scheme); err != nil {
 			return ctrl.Result{}, err
@@ -63,6 +94,9 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		logger.Info("Creating probe job", "job", jobName, "ttl", *job.Spec.TTLSecondsAfterFinished)
 		if err := r.Create(ctx, job); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+			}
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
@@ -70,12 +104,22 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	// 2. Wait until the Job finishes (Succeeded or Failed).
+	// If the existing Job is in the process of being deleted, wait for it to be fully removed.
+	if existingJob.DeletionTimestamp != nil {
+		return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
+	}
+
+	// 3. Wait until the Job finishes (Succeeded or Failed).
 	if existingJob.Status.Succeeded == 0 && existingJob.Status.Failed == 0 {
 		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
 	}
 
-	// 3. Find the Pod created by this Job and read its logs.
+	// If results for this Job have already been collected, wait for TTL cleanup or deletion.
+	if existingJob.Annotations != nil && existingJob.Annotations[networkv1alpha1.AnnotationJobCollected] == strTrue {
+		return ctrl.Result{}, nil
+	}
+
+	// 4. Find the Pod created by this Job and read its logs.
 	probePod, err := r.findJobPod(ctx, tc.Namespace, jobName)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 3 * time.Second}, err
@@ -98,8 +142,63 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
+	// Mark Job as collected so it won't be re-evaluated while waiting for TTL cleanup.
+	if existingJob.Annotations == nil {
+		existingJob.Annotations = make(map[string]string)
+	}
+	existingJob.Annotations[networkv1alpha1.AnnotationJobCollected] = strTrue
+	if err := r.Update(ctx, &existingJob); err != nil && !apierrors.IsNotFound(err) {
+		logger.V(1).Info("Could not mark job as collected", "job", jobName, "error", err)
+	}
+
 	// Kubernetes TTL controller deletes the Job and its Pod after TTLSecondsAfterFinished.
 	return ctrl.Result{}, nil
+}
+
+func isReconciliationStopped(tc *networkv1alpha1.TrafficCheck) bool {
+	if tc.Annotations == nil {
+		return false
+	}
+	if val, ok := tc.Annotations[networkv1alpha1.AnnotationStopReconcile]; ok {
+		if strings.ToLower(val) == strTrue || val == "1" || strings.ToLower(val) == strYes {
+			return true
+		}
+	}
+	if val, ok := tc.Annotations[networkv1alpha1.AnnotationPaused]; ok {
+		if strings.ToLower(val) == strTrue || val == "1" || strings.ToLower(val) == strYes {
+			return true
+		}
+	}
+	if val, ok := tc.Annotations[networkv1alpha1.AnnotationK8sPaused]; ok {
+		if strings.ToLower(val) == strTrue || val == "1" || strings.ToLower(val) == strYes {
+			return true
+		}
+	}
+	if val, ok := tc.Annotations[networkv1alpha1.AnnotationReconcile]; ok {
+		lower := strings.ToLower(val)
+		if lower == "disabled" || lower == "false" || lower == "stop" || lower == "paused" {
+			return true
+		}
+	}
+	return false
+}
+
+func isReRunRequested(tc *networkv1alpha1.TrafficCheck) bool {
+	if tc.Annotations == nil {
+		return false
+	}
+	if val, ok := tc.Annotations[networkv1alpha1.AnnotationReRun]; ok {
+		if strings.ToLower(val) == strTrue || val == "1" || strings.ToLower(val) == strYes {
+			return true
+		}
+	}
+	if val, ok := tc.Annotations[networkv1alpha1.AnnotationReconcile]; ok {
+		lower := strings.ToLower(val)
+		if lower == "now" || lower == "force" {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *TrafficCheckReconciler) buildProbeJob(tc *networkv1alpha1.TrafficCheck, name string) *batchv1.Job {
@@ -107,7 +206,7 @@ func (r *TrafficCheckReconciler) buildProbeJob(tc *networkv1alpha1.TrafficCheck,
 	for k, v := range tc.Spec.PodLabels {
 		labels[k] = v
 	}
-	labels["traffic-operator/probe"] = "true"
+	labels["traffic-operator/probe"] = strTrue
 
 	scriptLines := make([]string, 0, len(tc.Spec.Targets))
 	for _, t := range tc.Spec.Targets {
@@ -240,7 +339,13 @@ func (r *TrafficCheckReconciler) findJobPod(ctx context.Context, ns, jobName str
 	if len(pods.Items) == 0 {
 		return nil, fmt.Errorf("no pod found for job %s/%s", ns, jobName)
 	}
-	return &pods.Items[0], nil
+	latestPod := &pods.Items[0]
+	for i := 1; i < len(pods.Items); i++ {
+		if pods.Items[i].CreationTimestamp.After(latestPod.CreationTimestamp.Time) {
+			latestPod = &pods.Items[i]
+		}
+	}
+	return latestPod, nil
 }
 
 func (r *TrafficCheckReconciler) readPodLogs(ctx context.Context, pod *corev1.Pod) (logs string, err error) {

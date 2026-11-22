@@ -3,6 +3,12 @@ kind: TrafficCheck
 metadata:
   name: frontend-connectivity
   namespace: default
+  annotations:
+    # Annotation to stop/pause reconciliation on this TrafficCheck resource:
+    # network.djkormo.github.io/stop-reconcile: "true"
+    #
+    # Annotation to trigger an on-demand re-reconciliation:
+    # network.djkormo.github.io/re-run: "true"
 spec:
   podLabels:
     app: frontend
