@@ -3,7 +3,11 @@ name: Lint
 on:
   workflow_dispatch:
   push:
+    branches-ignore:
+      - 'gh-pages'
   pull_request:
+    branches-ignore:
+      - 'gh-pages'
 
 jobs:
   lint:
