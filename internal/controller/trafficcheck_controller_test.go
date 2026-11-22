@@ -147,7 +147,7 @@ var _ = Describe("TrafficCheck Controller", func() {
 		readyCond := meta.FindStatusCondition(updated.Status.Conditions, "Ready")
 		Expect(readyCond).NotTo(BeNil())
 		Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
-		Expect(readyCond.Reason).To(Equal("AllTargetsReachable"))
+		Expect(readyCond.Reason).To(Equal("AllTargetsMatched"))
 	})
 
 	It("sets Ready=False when any target fails", func() {
@@ -185,7 +185,41 @@ var _ = Describe("TrafficCheck Controller", func() {
 		readyCond := meta.FindStatusCondition(updated.Status.Conditions, "Ready")
 		Expect(readyCond).NotTo(BeNil())
 		Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(readyCond.Reason).To(Equal("TargetsUnreachable"))
+		Expect(readyCond.Reason).To(Equal("AccessExpectationFailed"))
+	})
+
+	It("sets Ready=True when traffic is correctly blocked", func() {
+		crName := "check-blocked-traffic"
+		expectAccess := false
+		tc := &networkv1alpha1.TrafficCheck{
+			ObjectMeta: metav1.ObjectMeta{Name: crName, Namespace: namespace},
+			Spec: networkv1alpha1.TrafficCheckSpec{
+				Targets: []networkv1alpha1.TargetEndpoint{{
+					Name: "blocked-db", Type: networkv1alpha1.TargetTypeService, Host: "database", Namespace: "production", Port: 5432, Access: &expectAccess,
+				}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, tc)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(ctx, tc) }()
+
+		r := newReconciler("RESULT|blocked-db|TCP|database.production.svc.cluster.local:5432|PASS|false|TCP connection timed out or refused\n")
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: namespace}}
+		_, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		jobName := fmt.Sprintf("traffic-probe-%s-g1", crName)
+		simulateJobCompletion(jobName)
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated networkv1alpha1.TrafficCheck
+		Expect(k8sClient.Get(ctx, req.NamespacedName, &updated)).To(Succeed())
+		Expect(updated.Status.Results).To(HaveLen(1))
+		Expect(updated.Status.Results[0].Reachable).To(BeFalse())
+		readyCond := meta.FindStatusCondition(updated.Status.Conditions, "Ready")
+		Expect(readyCond).NotTo(BeNil())
+		Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(readyCond.Reason).To(Equal("AllTargetsMatched"))
 	})
 
 	It("probes UDP targets with -u flag and records UDP protocol in status", func() {

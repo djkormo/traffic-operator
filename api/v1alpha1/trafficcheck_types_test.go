@@ -1,6 +1,7 @@
 package v1alpha1
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -69,6 +70,7 @@ func TestTargetEndpointDeepCopy(t *testing.T) {
 		Host:               "api-svc",
 		Namespace:          "prod",
 		Port:               8443,
+		Access:             ptr.To(false),
 		Path:               "/healthz",
 		ExpectedStatusCode: 200,
 		InsecureSkipVerify: true,
@@ -79,8 +81,12 @@ func TestTargetEndpointDeepCopy(t *testing.T) {
 	if copied == nil {
 		t.Fatal("expected non-nil copied endpoint")
 	}
-	if *copied != *endpoint {
+	if !reflect.DeepEqual(copied, endpoint) {
 		t.Errorf("copied endpoint mismatch: got %+v, want %+v", copied, endpoint)
+	}
+	*copied.Access = true
+	if *endpoint.Access {
+		t.Error("modifying copied Access should not modify original")
 	}
 }
 

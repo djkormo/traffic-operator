@@ -5,9 +5,27 @@ on:
   push:
     branches-ignore:
       - 'gh-pages'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'go.work'
+      - 'go.work.sum'
+      - 'api/**'
+      - 'config/crd/**'
+      - 'charts/traffic-operator/crds/**'
   pull_request:
     branches-ignore:
       - 'gh-pages'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'go.work'
+      - 'go.work.sum'
+      - 'api/**'
+      - 'config/crd/**'
+      - 'charts/traffic-operator/crds/**'
 
 jobs:
   test-e2e:
