@@ -246,3 +246,4 @@ You can reconcile the `TrafficCheck` resource through any of the following metho
 - appVersion `0.0.1`
 - Basic `TrafficCheck` CRD and controller deployment
 - Download: [`traffic-operator-0.1.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.1.0/traffic-operator-0.1.0.tgz)
+
