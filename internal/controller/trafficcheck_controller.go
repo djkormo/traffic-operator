@@ -58,50 +58,12 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	jobName := fmt.Sprintf("traffic-probe-%s-g%d", tc.Name, tc.Generation)
-	var existingJob batchv1.Job
-	err := r.Get(ctx, client.ObjectKey{Namespace: tc.Namespace, Name: jobName}, &existingJob)
-
-	// Check if an on-demand re-run was requested via annotation.
-	if isReRunRequested(&tc) {
-		if err == nil {
-			logger.Info("Re-run requested via annotation; deleting existing probe job", "job", jobName)
-			if delErr := r.Delete(ctx, &existingJob, client.PropagationPolicy(metav1.DeletePropagationBackground)); delErr != nil && !apierrors.IsNotFound(delErr) {
-				return ctrl.Result{}, delErr
-			}
-			return ctrl.Result{RequeueAfter: 1 * time.Second}, nil
-		}
-		// Clear re-run annotation once job is gone or being created
-		if tc.Annotations != nil && tc.Annotations[networkv1alpha1.AnnotationReRun] == strTrue {
-			delete(tc.Annotations, networkv1alpha1.AnnotationReRun)
-			if updateErr := r.Update(ctx, &tc); updateErr != nil {
-				return ctrl.Result{}, updateErr
-			}
-		}
-	}
-
-	// 2. Create the probe Job if it does not exist (initial run or after previous job was deleted).
-	if apierrors.IsNotFound(err) {
-		// Minimum cooldown of 5s between automatic re-runs of the same generation if previous results exist (prevents tight looping if TTL=0)
-		if tc.Status.ObservedGeneration == tc.Generation && len(tc.Status.Results) > 0 && time.Since(tc.Status.Results[0].LastChecked.Time) < 5*time.Second {
-			requeueIn := 5*time.Second - time.Since(tc.Status.Results[0].LastChecked.Time)
-			return ctrl.Result{RequeueAfter: requeueIn}, nil
-		}
-
-		job := r.buildProbeJob(&tc, jobName)
-		if err := ctrl.SetControllerReference(&tc, job, r.Scheme); err != nil {
-			return ctrl.Result{}, err
-		}
-
-		logger.Info("Creating probe job", "job", jobName, "ttl", *job.Spec.TTLSecondsAfterFinished)
-		if err := r.Create(ctx, job); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
-			}
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{RequeueAfter: 3 * time.Second}, nil
-	} else if err != nil {
+	existingJob, result, handled, err := r.getOrCreateProbeJob(ctx, &tc, jobName)
+	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if handled {
+		return result, nil
 	}
 
 	// If the existing Job is in the process of being deleted, wait for it to be fully removed.
@@ -147,12 +109,70 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		existingJob.Annotations = make(map[string]string)
 	}
 	existingJob.Annotations[networkv1alpha1.AnnotationJobCollected] = strTrue
-	if err := r.Update(ctx, &existingJob); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.Update(ctx, existingJob); err != nil && !apierrors.IsNotFound(err) {
 		logger.V(1).Info("Could not mark job as collected", "job", jobName, "error", err)
 	}
 
 	// Kubernetes TTL controller deletes the Job and its Pod after TTLSecondsAfterFinished.
 	return ctrl.Result{}, nil
+}
+
+func (r *TrafficCheckReconciler) getOrCreateProbeJob(ctx context.Context, tc *networkv1alpha1.TrafficCheck, jobName string) (*batchv1.Job, ctrl.Result, bool, error) {
+	logger := log.FromContext(ctx)
+	var existingJob batchv1.Job
+	err := r.Get(ctx, client.ObjectKey{Namespace: tc.Namespace, Name: jobName}, &existingJob)
+
+	// Check if an on-demand re-run was requested via annotation.
+	rerunRequested := isReRunRequested(tc)
+	if rerunRequested {
+		if err == nil {
+			logger.Info("Re-run requested via annotation; deleting existing probe job", "job", jobName)
+			if delErr := r.Delete(ctx, &existingJob, client.PropagationPolicy(metav1.DeletePropagationBackground)); delErr != nil && !apierrors.IsNotFound(delErr) {
+				return nil, ctrl.Result{}, false, delErr
+			}
+			return nil, ctrl.Result{RequeueAfter: 1 * time.Second}, true, nil
+		}
+		// Clear the one-shot re-run request once the previous job is gone.
+		if tc.Annotations != nil {
+			delete(tc.Annotations, networkv1alpha1.AnnotationReRun)
+			if val := strings.ToLower(tc.Annotations[networkv1alpha1.AnnotationReconcile]); val == "now" || val == "force" {
+				delete(tc.Annotations, networkv1alpha1.AnnotationReconcile)
+			}
+			if updateErr := r.Update(ctx, tc); updateErr != nil {
+				return nil, ctrl.Result{}, false, updateErr
+			}
+		}
+	}
+
+	// 2. Create the probe Job if it does not exist (initial run or after previous job was deleted).
+	if apierrors.IsNotFound(err) {
+		if !rerunRequested && (tc.Status.JobGeneration == tc.Generation || (tc.Status.ObservedGeneration == tc.Generation && len(tc.Status.Results) > 0)) {
+			log.FromContext(ctx).Info("Probe Job for this generation is already gone; not recreating it", "job", jobName)
+			return nil, ctrl.Result{}, true, nil
+		}
+
+		job := r.buildProbeJob(tc, jobName)
+		if err := ctrl.SetControllerReference(tc, job, r.Scheme); err != nil {
+			return nil, ctrl.Result{}, false, err
+		}
+
+		log.FromContext(ctx).Info("Creating probe job", "job", jobName, "ttl", *job.Spec.TTLSecondsAfterFinished)
+		if err := r.Create(ctx, job); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return nil, ctrl.Result{RequeueAfter: 2 * time.Second}, true, nil
+			}
+			return nil, ctrl.Result{}, false, err
+		}
+		tc.Status.JobGeneration = tc.Generation
+		if err := r.Status().Update(ctx, tc); err != nil {
+			return nil, ctrl.Result{}, false, err
+		}
+		return nil, ctrl.Result{RequeueAfter: 3 * time.Second}, true, nil
+	} else if err != nil {
+		return nil, ctrl.Result{}, false, err
+	}
+
+	return &existingJob, ctrl.Result{}, false, nil
 }
 
 func isReconciliationStopped(tc *networkv1alpha1.TrafficCheck) bool {

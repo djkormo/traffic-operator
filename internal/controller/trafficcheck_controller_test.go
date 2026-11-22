@@ -417,18 +417,14 @@ var _ = Describe("TrafficCheck Controller", func() {
 			return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &oldJob))
 		}, "5s", "500ms").Should(BeTrue())
 
-		// Fast-forward or ensure cooldown has passed so new job is created
-		Eventually(func() error {
-			_, err = r.Reconcile(ctx, req)
-			if err != nil {
-				return err
-			}
-			var newJob batchv1.Job
-			return k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &newJob)
-		}, "10s", "1s").Should(Succeed(), "expected new job to be created to reconcile trafficcheck after job deletion")
+		// Deletion ends this generation's run; it must not start another Job.
+		res, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job))).To(BeTrue())
 	})
 
-	It("does not reconcile after jobs are completed and deleted when stop-reconcile is set, and resumes when removed", func() {
+	It("does not recreate a deleted job when stop-reconcile is removed", func() {
 		crName := "check-stop-after-delete"
 		tc := &networkv1alpha1.TrafficCheck{
 			ObjectMeta: metav1.ObjectMeta{
@@ -481,18 +477,15 @@ var _ = Describe("TrafficCheck Controller", func() {
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "job should not be created while stop-reconcile is set")
 
-		// 5. Remove stop-reconcile annotation -> should resume reconciliation and recreate the job
+		// 5. Removing the pause does not restart a generation whose Job was deleted.
 		Expect(k8sClient.Get(ctx, req.NamespacedName, tc)).To(Succeed())
 		delete(tc.Annotations, networkv1alpha1.AnnotationStopReconcile)
 		Expect(k8sClient.Update(ctx, tc)).To(Succeed())
 
-		Eventually(func() error {
-			_, err = r.Reconcile(ctx, req)
-			if err != nil {
-				return err
-			}
-			return k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
-		}, "10s", "1s").Should(Succeed(), "job should be recreated once stop-reconcile is removed")
+		res, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+		Expect(apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job))).To(BeTrue())
 	})
 
 	It("triggers reconciliation on demand via re-run annotation", func() {
