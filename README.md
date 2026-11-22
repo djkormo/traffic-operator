@@ -98,6 +98,7 @@ spec:
       protocol: HTTPS
       host: api.github.com
       port: 443
+      access: true
       path: /
       expectedStatusCode: 200
       timeoutSeconds: 5
@@ -107,6 +108,7 @@ spec:
       host: kubernetes
       namespace: default
       port: 443
+      access: true
       path: /livez
       insecureSkipVerify: true
       expectedStatusCode: 401
@@ -118,6 +120,18 @@ Check results:
 ```bash
 kubectl get trafficcheck connectivity-check
 kubectl describe trafficcheck connectivity-check
+```
+
+Set `access: false` on a target to assert that the probe cannot reach it. The `Ready` condition is true when the observed result matches each target's expected `access` value; `.status.results[].reachable` continues to report the observed connectivity. Omitting `access` defaults to `true`.
+
+```yaml
+targets:
+  - name: blocked-database
+    type: KubernetesService
+    host: database
+    namespace: production
+    port: 5432
+    access: false
 ```
 
 ---

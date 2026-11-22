@@ -1,0 +1,26 @@
+apiVersion: network.djkormo.github.io/v1alpha1
+kind: TrafficCheck
+metadata:
+  name: denied-database-connectivity
+  namespace: default
+spec:
+  podLabels:
+    app: frontend
+  probeImage: nicolaka/netshoot:latest
+  ttlSecondsAfterFinished: 120
+  targets:
+    - name: database-must-be-denied
+      type: KubernetesService
+      protocol: TCP
+      host: database
+      namespace: production
+      port: 5432
+      access: false
+      timeoutSeconds: 3
+    - name: database-must-be-denied-external
+      type: External
+      protocol: TCP
+      host: black.house.gov
+      port: 5432
+      access: false
+      timeoutSeconds: 3

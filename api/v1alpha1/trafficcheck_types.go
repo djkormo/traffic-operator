@@ -76,6 +76,11 @@ type TargetEndpoint struct {
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`
 
+	// Access is the expected connectivity outcome. False asserts that traffic is blocked.
+	// +kubebuilder:default=true
+	// +optional
+	Access *bool `json:"access,omitempty"`
+
 	// Path is the URL path for HTTP/HTTPS checks (e.g. "/healthz"). Defaults to "/".
 	// +kubebuilder:default="/"
 	// +optional

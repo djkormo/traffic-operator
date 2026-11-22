@@ -234,6 +234,20 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			Expect(cmd).To(ContainSubstring("mysvc.custom-ns.svc.cluster.local 8080"))
 			Expect(cmd).To(ContainSubstring("nc -z -w 5"))
 		})
+
+		It("expects blocked connectivity when access is false", func() {
+			access := false
+			target := networkv1alpha1.TargetEndpoint{
+				Name:   "blocked-target",
+				Type:   networkv1alpha1.TargetTypeExternal,
+				Host:   testExampleHost,
+				Port:   443,
+				Access: &access,
+			}
+			cmd := buildTargetCommand(target, unitNamespace)
+			Expect(cmd).To(ContainSubstring(`[ "$reachable" = "false" ]`))
+			Expect(cmd).To(ContainSubstring(`RESULT|blocked-target|TCP|example.com:443|$check|$reachable|$message`))
+		})
 	})
 
 	Describe("findJobPod", func() {
@@ -305,6 +319,23 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			Expect(allPassed).To(BeTrue())
 			Expect(results).To(HaveLen(1))
 			Expect(results[0].Name).To(Equal("ok"))
+		})
+
+		It("reports actual connectivity separately from the expectation result", func() {
+			r := &TrafficCheckReconciler{
+				LogReader: func(ctx context.Context, ns, podName string) (string, error) {
+					return "RESULT|blocked|TCP|db:5432|PASS|false|TCP connection timed out\n" +
+						"RESULT|unexpectedly-blocked|TCP|api:443|FAIL|false|TCP connection timed out\n", nil
+				},
+			}
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p3", Namespace: unitNamespace}}
+			results, allPassed, err := r.collectResults(ctx, pod)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(allPassed).To(BeFalse())
+			Expect(results).To(HaveLen(2))
+			Expect(results[0].Reachable).To(BeFalse())
+			Expect(results[1].Reachable).To(BeFalse())
+			Expect(results[0].Message).To(ContainSubstring("timed out"))
 		})
 
 		It("calls Clientset GetLogs when LogReader is nil and handles errors and streams", func() {

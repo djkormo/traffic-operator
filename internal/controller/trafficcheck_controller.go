@@ -95,9 +95,9 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	tc.Status.ObservedGeneration = tc.Generation
 	tc.Status.Results = results
 	if allPassed {
-		r.setCondition(&tc, metav1.ConditionTrue, "AllTargetsReachable", "All configured targets are reachable")
+		r.setCondition(&tc, metav1.ConditionTrue, "AllTargetsMatched", "All configured access expectations matched")
 	} else {
-		r.setCondition(&tc, metav1.ConditionFalse, "TargetsUnreachable", "One or more targets failed connectivity check")
+		r.setCondition(&tc, metav1.ConditionFalse, "AccessExpectationFailed", "One or more targets did not match the expected access")
 	}
 
 	if err := r.Status().Update(ctx, &tc); err != nil {
@@ -297,6 +297,10 @@ func buildTargetCommand(t networkv1alpha1.TargetEndpoint, defaultNS string) stri
 	if proto == "" {
 		proto = networkv1alpha1.ProtocolTCP
 	}
+	expectedAccess := true
+	if t.Access != nil {
+		expectedAccess = *t.Access
+	}
 
 	switch proto {
 	case networkv1alpha1.ProtocolHTTP, networkv1alpha1.ProtocolHTTPS:
@@ -319,10 +323,8 @@ func buildTargetCommand(t networkv1alpha1.TargetEndpoint, defaultNS string) stri
 
 		return fmt.Sprintf(
 			`code=$(curl -sS -o /dev/null -w "%%{http_code}" --max-time %d %s"%s" 2>/dev/null); [ -z "$code" ] && code=000; `+
-				`if %s; then echo "RESULT|%s|%s|%s|PASS|HTTP $code"; else echo "RESULT|%s|%s|%s|FAIL|HTTP $code"; fi`,
-			timeout, insecureFlag, url, condition,
-			t.Name, proto, url,
-			t.Name, proto, url,
+				accessResultCommand(t, proto, url, condition, expectedAccess, "HTTP $code", "HTTP $code"),
+			timeout, insecureFlag, url,
 		)
 
 	default: // TCP or UDP
@@ -331,13 +333,23 @@ func buildTargetCommand(t networkv1alpha1.TargetEndpoint, defaultNS string) stri
 			ncFlags = fmt.Sprintf("-z -u -w %d", timeout)
 		}
 		addr := fmt.Sprintf("%s:%d", host, t.Port)
-		return fmt.Sprintf(
-			`if nc %s %s %d 2>/dev/null; then echo "RESULT|%s|%s|%s|PASS|%s connection succeeded"; else echo "RESULT|%s|%s|%s|FAIL|%s connection timed out or refused"; fi`,
-			ncFlags, host, t.Port,
-			t.Name, proto, addr, proto,
-			t.Name, proto, addr, proto,
-		)
+		protocolName := string(proto)
+		return accessResultCommand(t, proto, addr, fmt.Sprintf("nc %s %s %d 2>/dev/null", ncFlags, host, t.Port), expectedAccess, protocolName+" connection succeeded", protocolName+" connection timed out or refused")
 	}
+}
+
+func accessResultCommand(t networkv1alpha1.TargetEndpoint, proto networkv1alpha1.ProtocolType, address, condition string, expectedAccess bool, allowedMessage, blockedMessage string) string {
+	expected := "false"
+	if expectedAccess {
+		expected = "true"
+	}
+	return fmt.Sprintf(
+		`if %s; then reachable=true; else reachable=false; fi; `+
+			`if [ "$reachable" = "%s" ]; then check=PASS; else check=FAIL; fi; `+
+			`if [ "$reachable" = "true" ]; then message="%s"; else message="%s"; fi; `+
+			`echo "RESULT|%s|%s|%s|$check|$reachable|$message"`,
+		condition, expected, allowedMessage, blockedMessage, t.Name, proto, address,
+	)
 }
 
 func resolveHost(t networkv1alpha1.TargetEndpoint, defaultNS string) string {
@@ -406,11 +418,17 @@ func (r *TrafficCheckReconciler) collectResults(ctx context.Context, pod *corev1
 			continue
 		}
 		parts := strings.Split(line, "|")
-		if len(parts) != 6 {
+		if len(parts) != 6 && len(parts) != 7 {
 			continue
 		}
-		reachable := parts[4] == "PASS"
-		if !reachable {
+		checkPassed := parts[4] == "PASS"
+		reachable := checkPassed
+		message := parts[5]
+		if len(parts) == 7 {
+			reachable = parts[5] == "true"
+			message = parts[6]
+		}
+		if !checkPassed {
 			allPassed = false
 		}
 		results = append(results, networkv1alpha1.TargetResult{
@@ -418,7 +436,7 @@ func (r *TrafficCheckReconciler) collectResults(ctx context.Context, pod *corev1
 			Protocol:    networkv1alpha1.ProtocolType(parts[2]),
 			Address:     parts[3],
 			Reachable:   reachable,
-			Message:     parts[5],
+			Message:     message,
 			LastChecked: now,
 		})
 	}
