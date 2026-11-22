@@ -2,4 +2,5 @@
 resources:
 - network_v1alpha1_trafficcheck.yaml
 - network_v1alpha1_trafficcheck_deny.yaml
+
 # +kubebuilder:scaffold:manifestskustomizesamples
