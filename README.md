@@ -114,7 +114,7 @@ For full Helm chart configuration options and values reference, see the [Chart R
 Alternatively, deploy using Kustomize:
 
 ```bash
-make deploy IMG=djkormo/traffic-operator:0.0.1
+make deploy IMG=djkormo/traffic-operator:0.0.2
 ```
 
 ---
@@ -164,6 +164,53 @@ kubectl describe trafficcheck connectivity-check
 
 ---
 
+## Stopping and Triggering Reconciliation
+
+### Stopping Reconciliation on a TrafficCheck
+
+To temporarily or permanently stop reconciliation on a `TrafficCheck` resource (preventing probe jobs from being created or re-run), annotate the resource with `network.djkormo.github.io/stop-reconcile: "true"`:
+
+```bash
+# Stop reconciliation
+kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/stop-reconcile="true" --overwrite
+
+# Equivalent aliases also supported:
+kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/reconcile="disabled" --overwrite
+kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/paused="true" --overwrite
+```
+
+While reconciliation is stopped, the operator skips probe job creation and logs that reconciliation is paused.
+
+### Reconciling TrafficCheck After Jobs are Completed and Deleted
+
+When a probe Job finishes, its results are recorded in the `TrafficCheck.status`. Kubernetes cleans up the Job and its Pod after `ttlSecondsAfterFinished` has elapsed.
+
+You can reconcile the `TrafficCheck` resource through any of the following methods:
+
+1. **Automatic Reconciliation after Job Deletion**:
+   Once the completed Job is deleted (either automatically via `ttlSecondsAfterFinished` or manually via `kubectl delete job`), the operator automatically reconciles and runs a fresh connectivity probe, as long as reconciliation is not stopped by annotation.
+
+2. **Resume Reconciliation (Remove Stop Annotation)**:
+   If reconciliation was previously stopped via annotation, remove the annotation to resume:
+   ```bash
+   kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/stop-reconcile-
+   ```
+
+3. **On-Demand Re-run via Annotation**:
+   To immediately trigger a fresh probe without waiting:
+   ```bash
+   kubectl annotate trafficcheck connectivity-check network.djkormo.github.io/re-run="true" --overwrite
+   ```
+   If an existing probe Job exists, the operator will remove it and launch a new check.
+
+4. **Manual Job Deletion**:
+   Deleting the current probe Job triggers an immediate re-reconciliation:
+   ```bash
+   kubectl delete job -l traffic-operator/probe=true
+   ```
+
+---
+
 ## Development & Helm Makefile Targets
 
 | Target | Description |
@@ -171,6 +218,8 @@ kubectl describe trafficcheck connectivity-check
 | `make build` | Build the operator manager binary |
 | `make manifests` | Generate CRD and RBAC manifests |
 | `make helm-update-crds` | Regenerate and copy CRDs to `charts/traffic-operator/crds/` |
+| `make helm-update-rbac` | Regenerate and update RBAC templates in `charts/traffic-operator/templates/` from `config/rbac/` |
+| `make helm-update` | Regenerate and update both CRDs and RBAC in the Helm chart |
 | `make helm-lint` | Lint the Helm chart |
 | `make helm-template` | Render the Helm templates |
 | `make helm-docs` | Regenerate Helm documentation using `helm-docs` |
