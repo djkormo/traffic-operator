@@ -7,7 +7,14 @@ metadata:
     {{- include "traffic-operator.labels" . | nindent 4 }}
 rules:
 - apiGroups:
-  - ""
+  - ''
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ''
   resources:
   - pods
   verbs:
@@ -15,7 +22,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - ""
+  - ''
   resources:
   - pods/log
   verbs:
@@ -29,10 +36,11 @@ rules:
   - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - network.djkormo.github.io
-  - network.example.com
   resources:
   - trafficchecks
   verbs:
@@ -45,20 +53,12 @@ rules:
   - watch
 - apiGroups:
   - network.djkormo.github.io
-  - network.example.com
   resources:
   - trafficchecks/status
   verbs:
   - get
   - patch
   - update
-- apiGroups:
-  - ""
-  resources:
-  - events
-  verbs:
-  - create
-  - patch
 {{- if .Values.rbac.metricsAuth.enabled }}
 - apiGroups:
   - authentication.k8s.io

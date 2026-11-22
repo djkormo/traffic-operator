@@ -13,6 +13,32 @@ const (
 	TargetTypeExternal TargetType = "External"
 )
 
+const (
+	// AnnotationStopReconcile stops reconciliation when set to "true".
+	AnnotationStopReconcile = "network.djkormo.github.io/stop-reconcile"
+	// AnnotationReconcile controls reconciliation behavior.
+	// Set to "disabled" to stop reconciliation.
+	// Set to "now" or "force" to trigger reconciliation.
+	AnnotationReconcile = "network.djkormo.github.io/reconcile"
+	// AnnotationPaused is an alias to pause reconciliation when set to "true".
+	AnnotationPaused = "network.djkormo.github.io/paused"
+	// AnnotationK8sPaused is the standard Kubernetes paused annotation.
+	AnnotationK8sPaused = "reconcile.kubernetes.io/paused"
+
+	// AnnotationReRun triggers a re-run of the traffic check when set to "true".
+	AnnotationReRun = "network.djkormo.github.io/re-run"
+	// AnnotationReconcileAt triggers reconciliation when set to a new timestamp.
+	AnnotationReconcileAt = "network.djkormo.github.io/reconcile-at"
+
+	// AnnotationJobCollected marks that results from this Job have already been collected.
+	AnnotationJobCollected = "traffic-operator/collected"
+
+	// AnnotationValueTrue is the string literal "true".
+	AnnotationValueTrue = "true"
+	// AnnotationValueYes is the string literal "yes".
+	AnnotationValueYes = "yes"
+)
+
 // ProtocolType defines the protocol for the connectivity check.
 // +kubebuilder:validation:Enum=TCP;UDP;HTTP;HTTPS
 type ProtocolType string

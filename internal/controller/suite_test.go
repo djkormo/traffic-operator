@@ -39,6 +39,13 @@ import (
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
+const (
+	testLabelJobName   = "job-name"
+	testNetshootImg    = "nicolaka/netshoot:latest"
+	testExampleHost    = "example.com"
+	testContainerProbe = "probe"
+)
+
 var (
 	ctx       context.Context
 	cancel    context.CancelFunc

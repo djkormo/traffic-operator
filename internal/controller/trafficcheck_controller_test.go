@@ -8,10 +8,12 @@ import (
 	. "github.com/onsi/gomega"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	networkv1alpha1 "github.com/djkormo/traffic-operator/api/v1alpha1"
@@ -41,16 +43,31 @@ var _ = Describe("TrafficCheck Controller", func() {
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      jobName + "-pod",
 				Namespace: namespace,
-				Labels:    map[string]string{"job-name": jobName},
+				Labels:    map[string]string{testLabelJobName: jobName},
 			},
 			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "probe", Image: "nicolaka/netshoot:latest"}},
+				Containers: []corev1.Container{{Name: testContainerProbe, Image: testNetshootImg}},
 			},
 		}
 		Expect(k8sClient.Create(ctx, pod)).To(Succeed())
 
 		job.Status.Succeeded = 1
 		Expect(k8sClient.Status().Update(ctx, &job)).To(Succeed())
+	}
+
+	deleteJobAndPods := func(jobName string) {
+		var job batchv1.Job
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job); err == nil {
+			job.Finalizers = []string{}
+			_ = k8sClient.Update(ctx, &job)
+			_ = k8sClient.Delete(ctx, &job, client.PropagationPolicy(metav1.DeletePropagationBackground))
+		}
+		var pod corev1.Pod
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: jobName + "-pod", Namespace: namespace}, &pod); err == nil {
+			pod.Finalizers = []string{}
+			_ = k8sClient.Update(ctx, &pod)
+			_ = k8sClient.Delete(ctx, &pod, client.PropagationPolicy(metav1.DeletePropagationBackground))
+		}
 	}
 
 	It("creates a restricted Job with custom TTL and podLabels, then updates status on TCP PASS", func() {
@@ -93,7 +110,7 @@ var _ = Describe("TrafficCheck Controller", func() {
 		Expect(job.Spec.BackoffLimit).To(Equal(ptr.To(int32(0))))
 		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("app", "frontend"))
 		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("tier", "web"))
-		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("traffic-operator/probe", "true"))
+		Expect(job.Spec.Template.Labels).To(HaveKeyWithValue("traffic-operator/probe", strTrue))
 		Expect(job.Spec.Template.Spec.ServiceAccountName).To(Equal(defaultServiceAccount))
 		Expect(job.Spec.Template.Spec.AutomountServiceAccountToken).To(Equal(ptr.To(false)))
 		Expect(job.OwnerReferences).To(HaveLen(1))
@@ -143,7 +160,7 @@ var _ = Describe("TrafficCheck Controller", func() {
 			Spec: networkv1alpha1.TrafficCheckSpec{
 				PodLabels: map[string]string{"app": "isolated"},
 				Targets: []networkv1alpha1.TargetEndpoint{
-					{Name: "blocked-ext", Type: networkv1alpha1.TargetTypeExternal, Host: "example.com", Port: 443},
+					{Name: "blocked-ext", Type: networkv1alpha1.TargetTypeExternal, Host: testExampleHost, Port: 443},
 				},
 			},
 		}
@@ -311,5 +328,223 @@ var _ = Describe("TrafficCheck Controller", func() {
 			Namespace: namespace,
 		}, &jobG2)).To(Succeed())
 		Expect(jobG2.Spec.TTLSecondsAfterFinished).To(Equal(ptr.To(int32(30))))
+	})
+
+	It("stops reconciliation when stop-reconcile annotation is present", func() {
+		crName := "check-stop-reconcile"
+		tc := &networkv1alpha1.TrafficCheck{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      crName,
+				Namespace: namespace,
+				Annotations: map[string]string{
+					networkv1alpha1.AnnotationStopReconcile: strTrue,
+				},
+			},
+			Spec: networkv1alpha1.TrafficCheckSpec{
+				Targets: []networkv1alpha1.TargetEndpoint{
+					{Name: "svc-stop", Type: networkv1alpha1.TargetTypeService, Host: "svc-stop", Port: 80},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, tc)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(ctx, tc) }()
+
+		r := newReconciler("RESULT|svc-stop|TCP|svc-stop.default.svc.cluster.local:80|PASS|TCP connection succeeded\n")
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: namespace}}
+
+		res, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+
+		jobName := fmt.Sprintf("traffic-probe-%s-g1", crName)
+		var job batchv1.Job
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected no job to be created when stop-reconcile annotation is present")
+	})
+
+	It("reconciles trafficcheck after jobs are completed and deleted", func() {
+		crName := "check-reconcile-after-delete"
+		tc := &networkv1alpha1.TrafficCheck{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      crName,
+				Namespace: namespace,
+			},
+			Spec: networkv1alpha1.TrafficCheckSpec{
+				Targets: []networkv1alpha1.TargetEndpoint{
+					{Name: "svc-b", Type: networkv1alpha1.TargetTypeService, Host: "svc-b", Port: 80},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, tc)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(ctx, tc) }()
+
+		fakeLogs := "RESULT|svc-b|TCP|svc-b.default.svc.cluster.local:80|PASS|TCP connection succeeded\n"
+		r := newReconciler(fakeLogs)
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: namespace}}
+
+		// 1. Initial reconcile: creates first job
+		_, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		jobName := fmt.Sprintf("traffic-probe-%s-g1", crName)
+		var job batchv1.Job
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)).To(Succeed())
+
+		// 2. Complete first job and collect results
+		simulateJobCompletion(jobName)
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		var updated networkv1alpha1.TrafficCheck
+		Expect(k8sClient.Get(ctx, req.NamespacedName, &updated)).To(Succeed())
+		Expect(updated.Status.Results).To(HaveLen(1))
+		Expect(updated.Status.Results[0].Reachable).To(BeTrue())
+
+		// Verify job is marked as collected
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)).To(Succeed())
+		Expect(job.Annotations).To(HaveKeyWithValue(networkv1alpha1.AnnotationJobCollected, strTrue))
+
+		// While job still exists, another reconcile should not create another job or re-evaluate
+		res, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+
+		// 3. Delete the completed Job (simulating TTL cleanup or manual deletion)
+		deleteJobAndPods(jobName)
+
+		Eventually(func() bool {
+			var oldJob batchv1.Job
+			return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &oldJob))
+		}, "5s", "500ms").Should(BeTrue())
+
+		// Fast-forward or ensure cooldown has passed so new job is created
+		Eventually(func() error {
+			_, err = r.Reconcile(ctx, req)
+			if err != nil {
+				return err
+			}
+			var newJob batchv1.Job
+			return k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &newJob)
+		}, "10s", "1s").Should(Succeed(), "expected new job to be created to reconcile trafficcheck after job deletion")
+	})
+
+	It("does not reconcile after jobs are completed and deleted when stop-reconcile is set, and resumes when removed", func() {
+		crName := "check-stop-after-delete"
+		tc := &networkv1alpha1.TrafficCheck{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      crName,
+				Namespace: namespace,
+			},
+			Spec: networkv1alpha1.TrafficCheckSpec{
+				Targets: []networkv1alpha1.TargetEndpoint{
+					{Name: "svc-c", Type: networkv1alpha1.TargetTypeService, Host: "svc-c", Port: 80},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, tc)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(ctx, tc) }()
+
+		r := newReconciler("RESULT|svc-c|TCP|svc-c.default.svc.cluster.local:80|PASS|TCP connection succeeded\n")
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: namespace}}
+
+		// 1. Initial reconcile and job completion
+		_, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		jobName := fmt.Sprintf("traffic-probe-%s-g1", crName)
+		simulateJobCompletion(jobName)
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		// 2. Set stop-reconcile annotation on TrafficCheck
+		Expect(k8sClient.Get(ctx, req.NamespacedName, tc)).To(Succeed())
+		if tc.Annotations == nil {
+			tc.Annotations = make(map[string]string)
+		}
+		tc.Annotations[networkv1alpha1.AnnotationStopReconcile] = strTrue
+		Expect(k8sClient.Update(ctx, tc)).To(Succeed())
+
+		// 3. Delete the completed Job
+		deleteJobAndPods(jobName)
+
+		Eventually(func() bool {
+			var oldJob batchv1.Job
+			return apierrors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &oldJob))
+		}, "5s", "500ms").Should(BeTrue())
+
+		// 4. Reconcile while stop-reconcile is set -> should NOT recreate the job
+		res, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeZero())
+
+		var job batchv1.Job
+		err = k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "job should not be created while stop-reconcile is set")
+
+		// 5. Remove stop-reconcile annotation -> should resume reconciliation and recreate the job
+		Expect(k8sClient.Get(ctx, req.NamespacedName, tc)).To(Succeed())
+		delete(tc.Annotations, networkv1alpha1.AnnotationStopReconcile)
+		Expect(k8sClient.Update(ctx, tc)).To(Succeed())
+
+		Eventually(func() error {
+			_, err = r.Reconcile(ctx, req)
+			if err != nil {
+				return err
+			}
+			return k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
+		}, "10s", "1s").Should(Succeed(), "job should be recreated once stop-reconcile is removed")
+	})
+
+	It("triggers reconciliation on demand via re-run annotation", func() {
+		crName := "check-rerun-annotation"
+		tc := &networkv1alpha1.TrafficCheck{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      crName,
+				Namespace: namespace,
+			},
+			Spec: networkv1alpha1.TrafficCheckSpec{
+				Targets: []networkv1alpha1.TargetEndpoint{
+					{Name: "svc-d", Type: networkv1alpha1.TargetTypeService, Host: "svc-d", Port: 80},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, tc)).To(Succeed())
+		defer func() { _ = k8sClient.Delete(ctx, tc) }()
+
+		r := newReconciler("RESULT|svc-d|TCP|svc-d.default.svc.cluster.local:80|PASS|TCP connection succeeded\n")
+		req := reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: namespace}}
+
+		// Initial run
+		_, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		jobName := fmt.Sprintf("traffic-probe-%s-g1", crName)
+		simulateJobCompletion(jobName)
+		_, err = r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Set re-run annotation while job still exists
+		Expect(k8sClient.Get(ctx, req.NamespacedName, tc)).To(Succeed())
+		if tc.Annotations == nil {
+			tc.Annotations = make(map[string]string)
+		}
+		tc.Annotations[networkv1alpha1.AnnotationReRun] = strTrue
+		Expect(k8sClient.Update(ctx, tc)).To(Succeed())
+
+		// Reconcile deletes the existing job and requests requeue
+		res, err := r.Reconcile(ctx, req)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(res.RequeueAfter).To(BeNumerically(">", 0))
+
+		// Once deleted, next reconcile creates a new job
+		deleteJobAndPods(jobName)
+
+		Eventually(func() error {
+			_, err = r.Reconcile(ctx, req)
+			if err != nil {
+				return err
+			}
+			var job batchv1.Job
+			return k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
+		}, "10s", "1s").Should(Succeed())
 	})
 })

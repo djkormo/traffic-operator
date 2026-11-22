@@ -256,6 +256,18 @@ helm-update-crds: manifests ## Generate and update CRDs in the Helm chart from c
 .PHONY: helm-crds
 helm-crds: helm-update-crds ## Alias for helm-update-crds.
 
+.PHONY: helm-update-rbac
+helm-update-rbac: manifests ## Generate and update RBAC templates in the Helm chart from config/rbac.
+	@echo "Updating RBAC in charts/traffic-operator/templates/..."
+	$(PYTHON) hack/update-helm-rbac.py
+	@echo "RBAC successfully updated."
+
+.PHONY: helm-rbac
+helm-rbac: helm-update-rbac ## Alias for helm-update-rbac.
+
+.PHONY: helm-update
+helm-update: helm-update-crds helm-update-rbac ## Generate and update both CRDs and RBAC in the Helm chart.
+
 .PHONY: helm-lint
 helm-lint: ## Lint the Helm chart.
 	$(HELM) lint charts/traffic-operator
@@ -289,6 +301,7 @@ ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 HELM ?= $(LOCALBIN)/helm
 HELM_DOCS ?= helm-docs
+PYTHON ?= python3
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
