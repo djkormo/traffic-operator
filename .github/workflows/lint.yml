@@ -3,10 +3,16 @@ name: Lint
 on:
   workflow_dispatch:
   push:
+    branches-ignore:
+      - 'gh-pages'
   pull_request:
+    branches-ignore:
+      - 'gh-pages'
 
 jobs:
   lint:
+    # Prevents the job from running even if manually triggered on gh-pages
+    if: github.ref != 'refs/heads/gh-pages'
     name: Run on Ubuntu
     runs-on: ubuntu-latest
     steps:

@@ -3,11 +3,17 @@ name: Tests
 on:
   workflow_dispatch:
   push:
+    branches-ignore:
+      - 'gh-pages'
   pull_request:
+    branches-ignore:
+      - 'gh-pages'
 
 jobs:
   test:
     name: Run on Ubuntu
+    # Prevents the job from running even if manually triggered on gh-pages
+    if: github.ref != 'refs/heads/gh-pages'
     runs-on: ubuntu-latest
     steps:
       - name: Clone the code
