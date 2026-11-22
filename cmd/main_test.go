@@ -16,6 +16,13 @@ import (
 	networkv1alpha1 "github.com/djkormo/traffic-operator/api/v1alpha1"
 )
 
+const (
+	testValidHost          = "http://127.0.0.1:6443"
+	testInvalidHost        = "cache:/:@/invalid-url"
+	testMetricsBindAddress = "--metrics-bind-address=0"
+	testProbeBindAddress   = "--health-probe-bind-address=0"
+)
+
 func TestSchemeInitialization(t *testing.T) {
 	if !scheme.IsGroupRegistered(networkv1alpha1.GroupVersion.Group) {
 		t.Errorf("expected group %s to be registered in scheme", networkv1alpha1.GroupVersion.Group)
@@ -83,7 +90,7 @@ func TestSetupManagerSuccess(t *testing.T) {
 		return nil
 	}
 
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	opts := &Options{
 		MetricsAddr:          "0",
 		ProbeAddr:            "0",
@@ -100,7 +107,7 @@ func TestSetupManagerSuccess(t *testing.T) {
 }
 
 func TestSetupManagerInvalidConfig(t *testing.T) {
-	cfg := &rest.Config{Host: "cache:/:@/invalid-url"}
+	cfg := &rest.Config{Host: testInvalidHost}
 	opts := &Options{
 		MetricsAddr:          "0",
 		ProbeAddr:            "0",
@@ -124,7 +131,7 @@ func TestSetupManagerClientsetError(t *testing.T) {
 		return nil, errors.New("simulated clientset creation error")
 	}
 
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	opts := &Options{
 		MetricsAddr:          "0",
 		ProbeAddr:            "0",
@@ -148,7 +155,7 @@ func TestSetupManagerReconcilerError(t *testing.T) {
 		return errors.New("simulated reconciler setup error")
 	}
 
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	opts := &Options{
 		MetricsAddr:          "0",
 		ProbeAddr:            "0",
@@ -179,7 +186,7 @@ func TestSetupManagerHealthChecksError(t *testing.T) {
 		return errors.New("simulated health checks setup error")
 	}
 
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	opts := &Options{
 		MetricsAddr:          "0",
 		ProbeAddr:            "0",
@@ -196,7 +203,7 @@ func TestSetupManagerHealthChecksError(t *testing.T) {
 }
 
 func TestDefaultSetupReconciler(t *testing.T) {
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -223,7 +230,7 @@ func TestDefaultSetupReconciler(t *testing.T) {
 }
 
 func TestDefaultSetupHealthChecks(t *testing.T) {
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -239,7 +246,7 @@ func TestDefaultSetupHealthChecks(t *testing.T) {
 }
 
 func TestDefaultSetupHealthChecksError(t *testing.T) {
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -278,7 +285,7 @@ func TestDefaultSetupHealthChecksReadyzError(t *testing.T) {
 }
 
 func TestDefaultStartManager(t *testing.T) {
-	cfg := &rest.Config{Host: "http://127.0.0.1:6443"}
+	cfg := &rest.Config{Host: testValidHost}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: "0"},
@@ -314,15 +321,15 @@ func TestRunSuccess(t *testing.T) {
 		return nil
 	}
 	getConfig = func() *rest.Config {
-		return &rest.Config{Host: "http://127.0.0.1:6443"}
+		return &rest.Config{Host: testValidHost}
 	}
 	startManager = func(mgr ctrl.Manager, ctx context.Context) error {
 		return nil
 	}
 
 	args := []string{
-		"--metrics-bind-address=0",
-		"--health-probe-bind-address=0",
+		testMetricsBindAddress,
+		testProbeBindAddress,
 	}
 	if err := run(args); err != nil {
 		t.Fatalf("run failed: %v", err)
@@ -346,7 +353,7 @@ func TestRunSetupManagerError(t *testing.T) {
 	defer func() { getConfig = origGetConfig }()
 
 	getConfig = func() *rest.Config {
-		return &rest.Config{Host: "cache:/:@/invalid-url"}
+		return &rest.Config{Host: testInvalidHost}
 	}
 
 	if err := run([]string{}); err == nil {
@@ -373,15 +380,15 @@ func TestRunStartManagerError(t *testing.T) {
 		return nil
 	}
 	getConfig = func() *rest.Config {
-		return &rest.Config{Host: "http://127.0.0.1:6443"}
+		return &rest.Config{Host: testValidHost}
 	}
 	startManager = func(mgr ctrl.Manager, ctx context.Context) error {
 		return errors.New("simulated start error")
 	}
 
 	args := []string{
-		"--metrics-bind-address=0",
-		"--health-probe-bind-address=0",
+		testMetricsBindAddress,
+		testProbeBindAddress,
 	}
 	if err := run(args); err == nil {
 		t.Error("expected startManager error, got nil")
@@ -411,7 +418,7 @@ func TestMainSuccess(t *testing.T) {
 		return nil
 	}
 	getConfig = func() *rest.Config {
-		return &rest.Config{Host: "http://127.0.0.1:6443"}
+		return &rest.Config{Host: testValidHost}
 	}
 	startManager = func(mgr ctrl.Manager, ctx context.Context) error {
 		return nil
@@ -421,7 +428,7 @@ func TestMainSuccess(t *testing.T) {
 		exited = true
 	}
 
-	os.Args = []string{"traffic-operator", "--metrics-bind-address=0", "--health-probe-bind-address=0"}
+	os.Args = []string{"traffic-operator", testMetricsBindAddress, testProbeBindAddress}
 	main()
 
 	if exited {
@@ -445,7 +452,7 @@ func TestMainError(t *testing.T) {
 		return context.Background()
 	}
 	getConfig = func() *rest.Config {
-		return &rest.Config{Host: "cache:/:@/invalid-url"}
+		return &rest.Config{Host: testInvalidHost}
 	}
 	var exitCode int
 	exited := false

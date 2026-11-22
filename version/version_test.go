@@ -5,17 +5,19 @@ import (
 	"testing"
 )
 
+const defaultUnset = "unset"
+
 func TestVersionVariables(t *testing.T) {
 	if Application != "traffic-operator" {
 		t.Errorf("expected Application to be 'traffic-operator', got %s", Application)
 	}
-	if BuildTime != "unset" {
+	if BuildTime != defaultUnset {
 		t.Errorf("expected default BuildTime to be 'unset', got %s", BuildTime)
 	}
-	if Commit != "unset" {
+	if Commit != defaultUnset {
 		t.Errorf("expected default Commit to be 'unset', got %s", Commit)
 	}
-	if Release != "unset" {
+	if Release != defaultUnset {
 		t.Errorf("expected default Release to be 'unset', got %s", Release)
 	}
 }
