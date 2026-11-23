@@ -1,6 +1,6 @@
 # traffic-operator
 
-> **🚀 Latest release: Helm chart `0.2.0` (appVersion `0.0.2`) — [release notes](#helm-chart-changelog)**
+> **Latest release: Helm chart `0.4.0` (appVersion `0.0.4`) — [release notes](#helm-chart-changelog)**
 
 
 `traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints.
@@ -51,7 +51,7 @@ It continuously reconciles `TrafficCheck` custom resources by orchestrating ephe
 The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-pages` branch) at:
 **`https://djkormo.github.io/traffic-operator`**
 
-> **Latest available chart version: `0.2.0`** (appVersion `0.0.2`)
+> **Latest available chart version: `0.4.0`** (appVersion `0.0.4`)
 
 ### Option 1: Install from GitHub Pages Repository (Recommended)
 
@@ -66,7 +66,7 @@ The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-
    helm search repo traffic-operator
    ```
 
-3. **Install the operator** (latest `0.2.0`):
+3. **Install the operator** (latest `0.4.0`):
    ```bash
    helm install traffic-operator traffic-operator/traffic-operator \
      --namespace traffic-operator-system \
@@ -78,7 +78,7 @@ The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-
    helm install traffic-operator traffic-operator/traffic-operator \
      --namespace traffic-operator-system \
      --create-namespace \
-     --version 0.2.0
+     --version 0.4.0
    ```
 
 5. **(Optional) Install or upgrade with custom values**:
@@ -114,7 +114,7 @@ For full Helm chart configuration options and values reference, see the [Chart R
 Alternatively, deploy using Kustomize:
 
 ```bash
-make deploy IMG=djkormo/traffic-operator:0.0.2
+make deploy IMG=djkormo/traffic-operator:0.0.4
 ```
 
 ---
@@ -228,6 +228,21 @@ You can reconcile the `TrafficCheck` resource through any of the following metho
 ---
 
 ## Helm Chart Changelog
+
+### 0.4.0 (2026-11-22)
+
+- **Operator appVersion**: `0.0.4`
+- Added the `access` target expectation, defaulting to `true`
+- Added support for asserting that traffic is blocked (`access: false`)
+- Added a deny-policy sample for blocked connectivity validation
+- Download: [`traffic-operator-0.4.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.4.0/traffic-operator-0.4.0.tgz)
+
+### 0.3.0 (2026-11-22)
+
+- **Operator appVersion**: `0.0.3`
+- Added `jobGeneration` status tracking for probe reconciliation
+- Added probe re-run and reconciliation lifecycle improvements
+- Download: [`traffic-operator-0.3.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.3.0/traffic-operator-0.3.0.tgz)
 
 ### 0.2.0 (2026-11-22)
 
