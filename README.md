@@ -2,6 +2,8 @@ Look at https://djkormo.github.io/traffic-operator/
 
 # traffic-operator
 
+> **Latest release: Helm chart `0.4.0` (appVersion `0.0.4`) — [release notes](#helm-chart-releases)**
+
 `traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints.
 
 It continuously reconciles `TrafficCheck` custom resources by orchestrating ephemeral probe jobs and reporting target reachability directly in the resource status.
@@ -72,7 +74,7 @@ For full Helm chart configuration options, see the [Chart README](file:///mnt/c/
 Alternatively, deploy using Kustomize:
 
 ```bash
-make deploy IMG=djkormo/traffic-operator:0.0.1
+make deploy IMG=djkormo/traffic-operator:0.0.4
 ```
 
 ---
@@ -193,3 +195,22 @@ Deleting a Job manually only removes that Job; it does not request another probe
 | `make helm-template` | Render the Helm templates |
 | `make helm-docs` | Regenerate Helm documentation using `helm-docs` |
 | `make helm-package` | Package the Helm chart into `dist/` |
+
+---
+
+## Helm Chart Releases
+
+### 0.4.0 (2026-11-22)
+
+- **Operator appVersion**: `0.0.4`
+- Added the `access` target expectation, defaulting to `true`
+- Added support for asserting that traffic is blocked (`access: false`)
+- Added a deny-policy sample for blocked connectivity validation
+- Download: [`traffic-operator-0.4.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.4.0/traffic-operator-0.4.0.tgz)
+
+### 0.3.0 (2026-11-22)
+
+- **Operator appVersion**: `0.0.3`
+- Added `jobGeneration` status tracking for probe reconciliation
+- Added probe re-run and reconciliation lifecycle improvements
+- Download: [`traffic-operator-0.3.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.3.0/traffic-operator-0.3.0.tgz)
