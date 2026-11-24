@@ -27,6 +27,9 @@ spec:
     - jsonPath: .status.nonCompliantTargets
       name: NonCompliant
       type: string
+    - jsonPath: .status.results[0].lastChecked
+      name: CheckTime
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date

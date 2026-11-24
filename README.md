@@ -69,6 +69,16 @@ kubectl get pods -n traffic-operator-system
 
 For full Helm chart configuration options, see the [Chart README](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator/README.md).
 
+### Helm Chart History
+
+| Chart version | Application version | Release |
+|---|---|---|
+| 0.5.0 | 0.0.5 | Current chart version |
+| 0.4.0 | 0.0.4 | [traffic-operator-0.4.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.4.0) |
+| 0.3.0 | 0.0.3 | [traffic-operator-0.3.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.3.0) |
+| 0.2.0 | 0.0.2 | [traffic-operator-0.2.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.2.0) |
+| 0.1.0 | 0.0.1 | [traffic-operator-0.1.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.1.0) |
+
 ---
 
 ## Installation via Kustomize

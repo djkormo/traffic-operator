@@ -160,6 +160,7 @@ type TrafficCheckStatus struct {
 // +kubebuilder:printcolumn:name="Reconciled",type="string",JSONPath=".status.conditions[?(@.type=='Reconciled')].status"
 // +kubebuilder:printcolumn:name="Namespace",type="string",JSONPath=".metadata.namespace"
 // +kubebuilder:printcolumn:name="NonCompliant",type="string",JSONPath=".status.nonCompliantTargets"
+// +kubebuilder:printcolumn:name="CheckTime",type="date",JSONPath=".status.results[0].lastChecked"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 type TrafficCheck struct {

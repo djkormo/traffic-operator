@@ -189,7 +189,7 @@ func setupManager(cfg *rest.Config, opts *Options) (ctrl.Manager, error) {
 		Metrics:                metricsserver.Options{BindAddress: opts.MetricsAddr},
 		HealthProbeBindAddress: opts.ProbeAddr,
 		LeaderElection:         opts.EnableLeaderElection,
-		LeaderElectionID:       "traffic-operator.example.com",
+		LeaderElectionID:       "network.traffic-operator.djkormo.github.io",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
