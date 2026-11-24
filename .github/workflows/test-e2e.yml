@@ -13,7 +13,7 @@ on:
       - 'go.work.sum'
       - 'api/**'
       - 'config/crd/**'
-      - 'charts/traffic-operator/crds/**'
+      - 'charts/traffic-operator/templates/network.djkormo.github.io_trafficchecks.yaml'
   pull_request:
     branches-ignore:
       - 'gh-pages'
@@ -25,7 +25,7 @@ on:
       - 'go.work.sum'
       - 'api/**'
       - 'config/crd/**'
-      - 'charts/traffic-operator/crds/**'
+      - 'charts/traffic-operator/templates/network.djkormo.github.io_trafficchecks.yaml'
 
 jobs:
   test-e2e:

@@ -27,8 +27,9 @@ var _ = Describe("TrafficCheck Controller", func() {
 
 	newReconciler := func(fakeLogs string) *TrafficCheckReconciler {
 		return &TrafficCheckReconciler{
-			Client: k8sClient,
-			Scheme: k8sClient.Scheme(),
+			Client:            k8sClient,
+			Scheme:            k8sClient.Scheme(),
+			DefaultProbeImage: testNetshootImg,
 			LogReader: func(ctx context.Context, ns, podName string) (string, error) {
 				return fakeLogs, nil
 			},
@@ -148,6 +149,9 @@ var _ = Describe("TrafficCheck Controller", func() {
 		Expect(readyCond).NotTo(BeNil())
 		Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
 		Expect(readyCond.Reason).To(Equal("AllTargetsMatched"))
+		reconciledCond := meta.FindStatusCondition(updated.Status.Conditions, "Reconciled")
+		Expect(reconciledCond).NotTo(BeNil())
+		Expect(reconciledCond.Status).To(Equal(metav1.ConditionTrue))
 	})
 
 	It("sets Ready=False when any target fails", func() {
@@ -181,11 +185,15 @@ var _ = Describe("TrafficCheck Controller", func() {
 		Expect(k8sClient.Get(ctx, req.NamespacedName, &updated)).To(Succeed())
 		Expect(updated.Status.Results).To(HaveLen(1))
 		Expect(updated.Status.Results[0].Reachable).To(BeFalse())
+		Expect(updated.Status.NonCompliantTargets).To(Equal([]string{"blocked-ext"}))
 
 		readyCond := meta.FindStatusCondition(updated.Status.Conditions, "Ready")
 		Expect(readyCond).NotTo(BeNil())
 		Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 		Expect(readyCond.Reason).To(Equal("AccessExpectationFailed"))
+		reconciledCond := meta.FindStatusCondition(updated.Status.Conditions, "Reconciled")
+		Expect(reconciledCond).NotTo(BeNil())
+		Expect(reconciledCond.Status).To(Equal(metav1.ConditionTrue))
 	})
 
 	It("sets Ready=True when traffic is correctly blocked", func() {
@@ -216,6 +224,7 @@ var _ = Describe("TrafficCheck Controller", func() {
 		Expect(k8sClient.Get(ctx, req.NamespacedName, &updated)).To(Succeed())
 		Expect(updated.Status.Results).To(HaveLen(1))
 		Expect(updated.Status.Results[0].Reachable).To(BeFalse())
+		Expect(updated.Status.NonCompliantTargets).To(BeEmpty())
 		readyCond := meta.FindStatusCondition(updated.Status.Conditions, "Ready")
 		Expect(readyCond).NotTo(BeNil())
 		Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
@@ -394,6 +403,12 @@ var _ = Describe("TrafficCheck Controller", func() {
 		var job batchv1.Job
 		err = k8sClient.Get(ctx, types.NamespacedName{Name: jobName, Namespace: namespace}, &job)
 		Expect(apierrors.IsNotFound(err)).To(BeTrue(), "expected no job to be created when stop-reconcile annotation is present")
+
+		Expect(k8sClient.Get(ctx, req.NamespacedName, tc)).To(Succeed())
+		reconciledCond := meta.FindStatusCondition(tc.Status.Conditions, "Reconciled")
+		Expect(reconciledCond).NotTo(BeNil())
+		Expect(reconciledCond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(reconciledCond.Reason).To(Equal("ReconciliationPaused"))
 	})
 
 	It("reconciles trafficcheck after jobs are completed and deleted", func() {

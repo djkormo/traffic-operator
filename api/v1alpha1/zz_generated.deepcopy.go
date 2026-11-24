@@ -164,6 +164,11 @@ func (in *TrafficCheckStatus) DeepCopyInto(out *TrafficCheckStatus) {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.NonCompliantTargets != nil {
+		in, out := &in.NonCompliantTargets, &out.NonCompliantTargets
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]v1.Condition, len(*in))

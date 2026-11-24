@@ -7,20 +7,25 @@ import (
 	"os"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	networkv1alpha1 "github.com/djkormo/traffic-operator/api/v1alpha1"
+	operatorconfig "github.com/djkormo/traffic-operator/internal/config"
 )
 
 const (
-	testValidHost          = "http://127.0.0.1:6443"
-	testInvalidHost        = "cache:/:@/invalid-url"
-	testMetricsBindAddress = "--metrics-bind-address=0"
-	testProbeBindAddress   = "--health-probe-bind-address=0"
+	testTrafficOperatorName = "traffic-operator"
+	testValidHost           = "http://127.0.0.1:6443"
+	testInvalidHost         = "cache:/:@/invalid-url"
+	testMetricsBindAddress  = "--metrics-bind-address=0"
+	testProbeBindAddress    = "--health-probe-bind-address=0"
 )
 
 func TestSchemeInitialization(t *testing.T) {
@@ -86,7 +91,7 @@ func TestParseFlagsError(t *testing.T) {
 func TestSetupManagerSuccess(t *testing.T) {
 	origSetupReconciler := setupReconciler
 	defer func() { setupReconciler = origSetupReconciler }()
-	setupReconciler = func(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+	setupReconciler = func(mgr ctrl.Manager, clientset kubernetes.Interface) error {
 		return nil
 	}
 
@@ -127,7 +132,7 @@ func TestSetupManagerClientsetError(t *testing.T) {
 	origNewClientset := newClientset
 	defer func() { newClientset = origNewClientset }()
 
-	newClientset = func(c *rest.Config) (*kubernetes.Clientset, error) {
+	newClientset = func(c *rest.Config) (kubernetes.Interface, error) {
 		return nil, errors.New("simulated clientset creation error")
 	}
 
@@ -151,7 +156,7 @@ func TestSetupManagerReconcilerError(t *testing.T) {
 	origSetupReconciler := setupReconciler
 	defer func() { setupReconciler = origSetupReconciler }()
 
-	setupReconciler = func(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+	setupReconciler = func(mgr ctrl.Manager, clientset kubernetes.Interface) error {
 		return errors.New("simulated reconciler setup error")
 	}
 
@@ -179,7 +184,7 @@ func TestSetupManagerHealthChecksError(t *testing.T) {
 		setupHealthChecks = origSetupHealthChecks
 	}()
 
-	setupReconciler = func(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+	setupReconciler = func(mgr ctrl.Manager, clientset kubernetes.Interface) error {
 		return nil
 	}
 	setupHealthChecks = func(mgr ctrl.Manager) error {
@@ -203,6 +208,10 @@ func TestSetupManagerHealthChecksError(t *testing.T) {
 }
 
 func TestDefaultSetupReconciler(t *testing.T) {
+	t.Setenv(defaultProbeImageEnv, "")
+	t.Setenv(configMapNameEnv, "")
+	t.Setenv(podNamespaceEnv, "traffic-operator-system")
+	t.Setenv(helmReleaseNameEnv, testTrafficOperatorName)
 	cfg := &rest.Config{Host: testValidHost}
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
@@ -213,19 +222,106 @@ func TestDefaultSetupReconciler(t *testing.T) {
 		t.Fatalf("ctrl.NewManager failed: %v", err)
 	}
 
-	clientset, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		t.Fatalf("kubernetes.NewForConfig failed: %v", err)
-	}
+	clientset := kubernetesfake.NewSimpleClientset()
 
 	// First registration should succeed
 	if err := defaultSetupReconciler(mgr, clientset); err != nil {
 		t.Fatalf("defaultSetupReconciler failed: %v", err)
 	}
+	configMap, err := clientset.CoreV1().ConfigMaps("traffic-operator-system").Get(
+		context.Background(),
+		operatorconfig.DefaultProbeConfigMapName,
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("get ConfigMap created by defaultSetupReconciler: %v", err)
+	}
+	if configMap.Data[defaultProbeImageEnv] != operatorconfig.DefaultProbeImage {
+		t.Errorf("expected default image %q, got %q", operatorconfig.DefaultProbeImage, configMap.Data[defaultProbeImageEnv])
+	}
 
 	// Duplicate registration should fail
 	if err := defaultSetupReconciler(mgr, clientset); err == nil {
 		t.Error("expected duplicate reconciler registration to fail, got nil")
+	}
+}
+
+func TestEnsureProbeConfigMapCreatesWhenMissing(t *testing.T) {
+	clientset := kubernetesfake.NewSimpleClientset()
+	image, err := ensureProbeConfigMap(
+		context.Background(),
+		clientset,
+		"traffic-operator-system",
+		"traffic-operator-config",
+		"nicolaka/netshoot:test",
+		testTrafficOperatorName,
+	)
+	if err != nil {
+		t.Fatalf("ensureProbeConfigMap failed: %v", err)
+	}
+	if image != "nicolaka/netshoot:test" {
+		t.Fatalf("expected configured default image, got %q", image)
+	}
+
+	configMap, err := clientset.CoreV1().ConfigMaps("traffic-operator-system").Get(
+		context.Background(),
+		"traffic-operator-config",
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		t.Fatalf("get created ConfigMap: %v", err)
+	}
+	if configMap.Data[defaultProbeImageEnv] != image {
+		t.Errorf("expected ConfigMap image %q, got %q", image, configMap.Data[defaultProbeImageEnv])
+	}
+	if configMap.Annotations["meta.helm.sh/release-name"] != testTrafficOperatorName {
+		t.Errorf("expected Helm release ownership annotation, got %q", configMap.Annotations["meta.helm.sh/release-name"])
+	}
+}
+
+func TestEnsureProbeConfigMapPreservesExistingValue(t *testing.T) {
+	clientset := kubernetesfake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "traffic-operator-config",
+			Namespace: "traffic-operator-system",
+		},
+		Data: map[string]string{defaultProbeImageEnv: "custom/netshoot:v2"},
+	})
+
+	image, err := ensureProbeConfigMap(
+		context.Background(),
+		clientset,
+		"traffic-operator-system",
+		"traffic-operator-config",
+		"nicolaka/netshoot:test",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("ensureProbeConfigMap failed: %v", err)
+	}
+	if image != "custom/netshoot:v2" {
+		t.Fatalf("expected existing ConfigMap image, got %q", image)
+	}
+}
+
+func TestEnsureProbeConfigMapRejectsEmptyValue(t *testing.T) {
+	clientset := kubernetesfake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "traffic-operator-config",
+			Namespace: "traffic-operator-system",
+		},
+	})
+
+	_, err := ensureProbeConfigMap(
+		context.Background(),
+		clientset,
+		"traffic-operator-system",
+		"traffic-operator-config",
+		"nicolaka/netshoot:test",
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected error for existing ConfigMap without a probe image")
 	}
 }
 
@@ -317,7 +413,7 @@ func TestRunSuccess(t *testing.T) {
 	setupSignalHandler = func() context.Context {
 		return context.Background()
 	}
-	setupReconciler = func(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+	setupReconciler = func(mgr ctrl.Manager, clientset kubernetes.Interface) error {
 		return nil
 	}
 	getConfig = func() *rest.Config {
@@ -376,7 +472,7 @@ func TestRunStartManagerError(t *testing.T) {
 	setupSignalHandler = func() context.Context {
 		return context.Background()
 	}
-	setupReconciler = func(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+	setupReconciler = func(mgr ctrl.Manager, clientset kubernetes.Interface) error {
 		return nil
 	}
 	getConfig = func() *rest.Config {
@@ -414,7 +510,7 @@ func TestMainSuccess(t *testing.T) {
 	setupSignalHandler = func() context.Context {
 		return context.Background()
 	}
-	setupReconciler = func(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+	setupReconciler = func(mgr ctrl.Manager, clientset kubernetes.Interface) error {
 		return nil
 	}
 	getConfig = func() *rest.Config {
@@ -428,7 +524,7 @@ func TestMainSuccess(t *testing.T) {
 		exited = true
 	}
 
-	os.Args = []string{"traffic-operator", testMetricsBindAddress, testProbeBindAddress}
+	os.Args = []string{testTrafficOperatorName, testMetricsBindAddress, testProbeBindAddress}
 	main()
 
 	if exited {
@@ -461,7 +557,7 @@ func TestMainError(t *testing.T) {
 		exitCode = code
 	}
 
-	os.Args = []string{"traffic-operator"}
+	os.Args = []string{testTrafficOperatorName}
 	main()
 
 	if !exited {

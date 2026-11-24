@@ -35,7 +35,7 @@ spec:
     - name: google-dns
       type: External
       protocol: UDP
-      host: 8.8.8.7
+      host: black.house.gov
       namespace: default
       port: 53
       insecureSkipVerify: true
