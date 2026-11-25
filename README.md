@@ -2,7 +2,7 @@ Look at https://djkormo.github.io/traffic-operator/
 
 # traffic-operator
 
-> **Latest release: Helm chart `0.4.0` (appVersion `0.0.4`) — [release notes](#helm-chart-releases)**
+> **Latest release: Helm chart `0.5.0` (appVersion `0.0.5`) — [release notes](#helm-chart-releases)**
 
 `traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints.
 
@@ -73,7 +73,7 @@ For full Helm chart configuration options, see the [Chart README](file:///mnt/c/
 
 | Chart version | Application version | Release |
 |---|---|---|
-| 0.5.0 | 0.0.5 | Current chart version |
+| 0.5.0 | 0.0.5 | Released 2026-11-25 |
 | 0.4.0 | 0.0.4 | [traffic-operator-0.4.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.4.0) |
 | 0.3.0 | 0.0.3 | [traffic-operator-0.3.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.3.0) |
 | 0.2.0 | 0.0.2 | [traffic-operator-0.2.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.2.0) |
@@ -211,6 +211,15 @@ Deleting a Job manually only removes that Job; it does not request another probe
 ---
 
 ## Helm Chart Releases
+
+### 0.5.0 (2026-11-25)
+
+- **Operator appVersion**: `0.0.5`
+- Added the `probe.defaultImage` value and a ConfigMap to configure the operator's default probe image.
+- Added ConfigMap access permissions and automatic operator pod rollout when the ConfigMap changes.
+- Moved the TrafficCheck CRD into Helm templates and added `crds.enabled` (default: `true`) so it is included in rendered manifests and managed during upgrades.
+- Added the `CheckTime` kubectl printer column for the most recent probe result.
+- **Upgrade note**: Existing releases may need to adopt the already-installed CRD. The templated CRD is Helm-managed; uninstalling the chart can delete the CRD and its `TrafficCheck` resources. Set `crds.enabled: false` when managing the CRD separately.
 
 ### 0.4.0 (2026-11-22)
 
