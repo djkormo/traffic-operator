@@ -1,2 +1,19 @@
 resources:
 - manager.yaml
+configMapGenerator:
+- name: config
+  options:
+    disableNameSuffixHash: true
+  literals:
+  - DEFAULT_PROBE_IMAGE=nicolaka/netshoot:latest
+replacements:
+- source:
+    kind: ConfigMap
+    name: config
+    fieldPath: data.DEFAULT_PROBE_IMAGE
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=DEFAULT_PROBE_IMAGE].value

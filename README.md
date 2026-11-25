@@ -40,7 +40,7 @@ It continuously reconciles `TrafficCheck` custom resources by orchestrating ephe
 ```
 
 1. **User creates a `TrafficCheck` CR** defining targets (internal Kubernetes services or external endpoints).
-2. **`traffic-operator` reconciles the CR** and spins up a targeted probe Job using a lightweight networking container (`nicolaka/netshoot` by default).
+2. **`traffic-operator` reconciles the CR** and spins up a targeted probe Job using the default image from its ConfigMap (`nicolaka/netshoot:latest` by default), unless `spec.probeImage` overrides it.
 3. **Probe executes checks**: Supports TCP port connectivity, UDP, HTTP, and HTTPS endpoints with status code assertion and TLS verification controls.
 4. **Operator updates CR status**: Collects results (status codes and failure messages) and sets `Ready=True` when every target matches its expected access (`AllTargetsMatched`), or `Ready=False` when one or more expectations fail (`AccessExpectationFailed`).
 5. **Job cleanup**: Ephemeral jobs and pods are automatically cleaned up via Kubernetes `ttlSecondsAfterFinished`.
@@ -59,6 +59,8 @@ helm install traffic-operator ./charts/traffic-operator \
   --create-namespace
 ```
 
+The chart stores the default probe-job image in a dedicated ConfigMap. Configure it with Helm values such as `--set probe.defaultImage=registry.example.com/netshoot:v1`; an individual `TrafficCheck` can override it with `spec.probeImage`.
+
 ### Verify Deployment
 
 ```bash
@@ -66,6 +68,16 @@ kubectl get pods -n traffic-operator-system
 ```
 
 For full Helm chart configuration options, see the [Chart README](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator/README.md).
+
+### Helm Chart History
+
+| Chart version | Application version | Release |
+|---|---|---|
+| 0.5.0 | 0.0.5 | Current chart version |
+| 0.4.0 | 0.0.4 | [traffic-operator-0.4.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.4.0) |
+| 0.3.0 | 0.0.3 | [traffic-operator-0.3.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.3.0) |
+| 0.2.0 | 0.0.2 | [traffic-operator-0.2.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.2.0) |
+| 0.1.0 | 0.0.1 | [traffic-operator-0.1.0](https://github.com/djkormo/traffic-operator/tree/traffic-operator-0.1.0) |
 
 ---
 
@@ -188,7 +200,7 @@ Deleting a Job manually only removes that Job; it does not request another probe
 |---|---|
 | `make build` | Build the operator manager binary |
 | `make manifests` | Generate CRD and RBAC manifests |
-| `make helm-update-crds` | Regenerate and copy CRDs to `charts/traffic-operator/crds/` |
+| `make helm-update-crds` | Regenerate and copy CRDs to `charts/traffic-operator/templates/` |
 | `make helm-update-rbac` | Regenerate and update RBAC templates in `charts/traffic-operator/templates/` from `config/rbac/` |
 | `make helm-update` | Regenerate and update both CRDs and RBAC in the Helm chart |
 | `make helm-lint` | Lint the Helm chart |

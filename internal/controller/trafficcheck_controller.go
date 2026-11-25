@@ -30,8 +30,9 @@ const (
 
 type TrafficCheckReconciler struct {
 	client.Client
-	Scheme    *runtime.Scheme
-	Clientset *kubernetes.Clientset
+	Scheme            *runtime.Scheme
+	Clientset         kubernetes.Interface
+	DefaultProbeImage string
 	// LogReader overrides pod log fetching in tests. If nil, Clientset is used.
 	LogReader func(ctx context.Context, namespace, podName string) (string, error)
 }
@@ -54,6 +55,17 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	// 1. Check if reconciliation is stopped via annotation.
 	if isReconciliationStopped(&tc) {
 		logger.Info("Reconciliation is stopped via annotation", "trafficcheck", tc.Name)
+		reconciledCondition := meta.FindStatusCondition(tc.Status.Conditions, "Reconciled")
+		if tc.Status.ObservedGeneration != tc.Generation &&
+			(reconciledCondition == nil ||
+				reconciledCondition.Status != metav1.ConditionFalse ||
+				reconciledCondition.ObservedGeneration != tc.Generation ||
+				reconciledCondition.Reason != "ReconciliationPaused") {
+			r.setReconciledCondition(&tc, metav1.ConditionFalse, "ReconciliationPaused", "Reconciliation is paused for the current generation")
+			if err := r.Status().Update(ctx, &tc); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -87,13 +99,15 @@ func (r *TrafficCheckReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{RequeueAfter: 3 * time.Second}, err
 	}
 
-	results, allPassed, err := r.collectResults(ctx, probePod)
+	results, nonCompliantTargets, allPassed, err := r.collectResults(ctx, probePod)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 
 	tc.Status.ObservedGeneration = tc.Generation
 	tc.Status.Results = results
+	tc.Status.NonCompliantTargets = nonCompliantTargets
+	r.setReconciledCondition(&tc, metav1.ConditionTrue, "ProbeCompleted", "Probe results collected for the current generation")
 	if allPassed {
 		r.setCondition(&tc, metav1.ConditionTrue, "AllTargetsMatched", "All configured access expectations matched")
 	} else {
@@ -127,6 +141,10 @@ func (r *TrafficCheckReconciler) getOrCreateProbeJob(ctx context.Context, tc *ne
 	if rerunRequested {
 		if err == nil {
 			logger.Info("Re-run requested via annotation; deleting existing probe job", "job", jobName)
+			r.setReconciledCondition(tc, metav1.ConditionFalse, "ProbeRunning", "A probe rerun is in progress")
+			if updateErr := r.Status().Update(ctx, tc); updateErr != nil {
+				return nil, ctrl.Result{}, false, updateErr
+			}
 			if delErr := r.Delete(ctx, &existingJob, client.PropagationPolicy(metav1.DeletePropagationBackground)); delErr != nil && !apierrors.IsNotFound(delErr) {
 				return nil, ctrl.Result{}, false, delErr
 			}
@@ -164,6 +182,7 @@ func (r *TrafficCheckReconciler) getOrCreateProbeJob(ctx context.Context, tc *ne
 			return nil, ctrl.Result{}, false, err
 		}
 		tc.Status.JobGeneration = tc.Generation
+		r.setReconciledCondition(tc, metav1.ConditionFalse, "ProbeRunning", "Probe is running for the current generation")
 		if err := r.Status().Update(ctx, tc); err != nil {
 			return nil, ctrl.Result{}, false, err
 		}
@@ -235,7 +254,7 @@ func (r *TrafficCheckReconciler) buildProbeJob(tc *networkv1alpha1.TrafficCheck,
 
 	image := tc.Spec.ProbeImage
 	if image == "" {
-		image = "nicolaka/netshoot:latest"
+		image = r.DefaultProbeImage
 	}
 
 	ttl := int32(60)
@@ -402,15 +421,16 @@ func (r *TrafficCheckReconciler) readPodLogs(ctx context.Context, pod *corev1.Po
 	return buf.String(), nil
 }
 
-func (r *TrafficCheckReconciler) collectResults(ctx context.Context, pod *corev1.Pod) ([]networkv1alpha1.TargetResult, bool, error) {
+func (r *TrafficCheckReconciler) collectResults(ctx context.Context, pod *corev1.Pod) ([]networkv1alpha1.TargetResult, []string, bool, error) {
 	logs, err := r.readPodLogs(ctx, pod)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 
 	now := metav1.Now()
 	lines := strings.Split(logs, "\n")
 	results := make([]networkv1alpha1.TargetResult, 0, len(lines))
+	nonCompliantTargets := make([]string, 0)
 	allPassed := true
 
 	for _, line := range lines {
@@ -422,6 +442,9 @@ func (r *TrafficCheckReconciler) collectResults(ctx context.Context, pod *corev1
 			continue
 		}
 		checkPassed := parts[4] == "PASS"
+		if !checkPassed {
+			nonCompliantTargets = append(nonCompliantTargets, parts[1])
+		}
 		reachable := checkPassed
 		message := parts[5]
 		if len(parts) == 7 {
@@ -440,12 +463,22 @@ func (r *TrafficCheckReconciler) collectResults(ctx context.Context, pod *corev1
 			LastChecked: now,
 		})
 	}
-	return results, allPassed, nil
+	return results, nonCompliantTargets, allPassed, nil
 }
 
 func (r *TrafficCheckReconciler) setCondition(tc *networkv1alpha1.TrafficCheck, status metav1.ConditionStatus, reason, msg string) {
 	meta.SetStatusCondition(&tc.Status.Conditions, metav1.Condition{
 		Type:               "Ready",
+		Status:             status,
+		ObservedGeneration: tc.Generation,
+		Reason:             reason,
+		Message:            msg,
+	})
+}
+
+func (r *TrafficCheckReconciler) setReconciledCondition(tc *networkv1alpha1.TrafficCheck, status metav1.ConditionStatus, reason, msg string) {
+	meta.SetStatusCondition(&tc.Status.Conditions, metav1.Condition{
+		Type:               "Reconciled",
 		Status:             status,
 		ObservedGeneration: tc.Generation,
 		Reason:             reason,

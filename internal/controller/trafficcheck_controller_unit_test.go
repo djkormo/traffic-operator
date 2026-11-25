@@ -12,6 +12,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -88,8 +89,9 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 
 	newReconciler := func(fakeLogs string) *TrafficCheckReconciler {
 		return &TrafficCheckReconciler{
-			Client: k8sClient,
-			Scheme: k8sClient.Scheme(),
+			Client:            k8sClient,
+			Scheme:            k8sClient.Scheme(),
+			DefaultProbeImage: testNetshootImg,
 			LogReader: func(ctx context.Context, ns, podName string) (string, error) {
 				return fakeLogs, nil
 			},
@@ -192,7 +194,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 	})
 
 	Describe("buildProbeJob and command builders", func() {
-		r := &TrafficCheckReconciler{}
+		r := &TrafficCheckReconciler{DefaultProbeImage: testNetshootImg}
 
 		It("uses default probe image and default TTL when unspecified", func() {
 			tc := &networkv1alpha1.TrafficCheck{
@@ -206,6 +208,10 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			job := r.buildProbeJob(tc, "probe-job")
 			Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(testNetshootImg))
 			Expect(*job.Spec.TTLSecondsAfterFinished).To(Equal(int32(60)))
+
+			tc.Spec.ProbeImage = "custom/netshoot:v1"
+			job = r.buildProbeJob(tc, "probe-job-custom-image")
+			Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal("custom/netshoot:v1"))
 		})
 
 		It("builds HTTP commands with default path, timeout, and without insecure flag", func() {
@@ -303,7 +309,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 				},
 			}
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p1", Namespace: unitNamespace}}
-			_, _, err := r.collectResults(ctx, pod)
+			_, _, _, err := r.collectResults(ctx, pod)
 			Expect(err).To(MatchError("pod log read failure"))
 		})
 
@@ -314,28 +320,31 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 				},
 			}
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p2", Namespace: unitNamespace}}
-			results, allPassed, err := r.collectResults(ctx, pod)
+			results, nonCompliantTargets, allPassed, err := r.collectResults(ctx, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(allPassed).To(BeTrue())
 			Expect(results).To(HaveLen(1))
 			Expect(results[0].Name).To(Equal("ok"))
+			Expect(nonCompliantTargets).To(BeEmpty())
 		})
 
 		It("reports actual connectivity separately from the expectation result", func() {
 			r := &TrafficCheckReconciler{
 				LogReader: func(ctx context.Context, ns, podName string) (string, error) {
 					return "RESULT|blocked|TCP|db:5432|PASS|false|TCP connection timed out\n" +
-						"RESULT|unexpectedly-blocked|TCP|api:443|FAIL|false|TCP connection timed out\n", nil
+						"RESULT|unexpectedly-blocked|TCP|api:443|FAIL|false|TCP connection timed out\n" +
+						"RESULT|unexpectedly-open|TCP|web:80|FAIL|true|TCP connection succeeded\n", nil
 				},
 			}
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p3", Namespace: unitNamespace}}
-			results, allPassed, err := r.collectResults(ctx, pod)
+			results, nonCompliantTargets, allPassed, err := r.collectResults(ctx, pod)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(allPassed).To(BeFalse())
-			Expect(results).To(HaveLen(2))
+			Expect(results).To(HaveLen(3))
 			Expect(results[0].Reachable).To(BeFalse())
 			Expect(results[1].Reachable).To(BeFalse())
 			Expect(results[0].Message).To(ContainSubstring("timed out"))
+			Expect(nonCompliantTargets).To(Equal([]string{"unexpectedly-blocked", "unexpectedly-open"}))
 		})
 
 		It("calls Clientset GetLogs when LogReader is nil and handles errors and streams", func() {
@@ -405,6 +414,11 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			// 1st reconcile: creates job
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
+			var updated networkv1alpha1.TrafficCheck
+			Expect(k8sClient.Get(ctx, req.NamespacedName, &updated)).To(Succeed())
+			reconciledCond := meta.FindStatusCondition(updated.Status.Conditions, "Reconciled")
+			Expect(reconciledCond).NotTo(BeNil())
+			Expect(reconciledCond.Status).To(Equal(metav1.ConditionFalse))
 
 			// 2nd reconcile: job exists with Succeeded=0 and Failed=0
 			res, err := r.Reconcile(ctx, req)
@@ -519,8 +533,9 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 			defer func() { _ = k8sClient.Delete(ctx, tc) }()
 
 			r := &TrafficCheckReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:            k8sClient,
+				Scheme:            k8sClient.Scheme(),
+				DefaultProbeImage: testNetshootImg,
 				LogReader: func(ctx context.Context, ns, podName string) (string, error) {
 					return "", fmt.Errorf("simulated log read failure")
 				},
@@ -604,7 +619,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 				Client:    k8sClient,
 				createErr: apierrors.NewAlreadyExists(schema.GroupResource{Group: "batch", Resource: "jobs"}, "probe"),
 			}
-			r := &TrafficCheckReconciler{Client: hookCl, Scheme: k8sClient.Scheme()}
+			r := &TrafficCheckReconciler{Client: hookCl, Scheme: k8sClient.Scheme(), DefaultProbeImage: testNetshootImg}
 			res, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: unitNamespace}})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(res.RequeueAfter).To(Equal(2 * time.Second))
@@ -614,7 +629,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 				Client:    k8sClient,
 				createErr: fmt.Errorf("simulated create failure"),
 			}
-			rGeneric := &TrafficCheckReconciler{Client: hookClGeneric, Scheme: k8sClient.Scheme()}
+			rGeneric := &TrafficCheckReconciler{Client: hookClGeneric, Scheme: k8sClient.Scheme(), DefaultProbeImage: testNetshootImg}
 			_, err = rGeneric.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: unitNamespace}})
 			Expect(err).To(MatchError("simulated create failure"))
 		})
@@ -655,7 +670,7 @@ var _ = Describe("TrafficCheck Controller Unit Tests and Edge Cases", func() {
 				Client:    k8sClient,
 				deleteErr: fmt.Errorf("simulated delete failure"),
 			}
-			r := &TrafficCheckReconciler{Client: hookCl, Scheme: k8sClient.Scheme()}
+			r := &TrafficCheckReconciler{Client: hookCl, Scheme: k8sClient.Scheme(), DefaultProbeImage: testNetshootImg}
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: crName, Namespace: unitNamespace}})
 			Expect(err).To(MatchError("simulated delete failure"))
 		})

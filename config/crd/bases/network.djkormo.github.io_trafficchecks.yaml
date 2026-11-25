@@ -18,6 +18,18 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Reconciled')].status
+      name: Reconciled
+      type: string
+    - jsonPath: .metadata.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .status.nonCompliantTargets
+      name: NonCompliant
+      type: string
+    - jsonPath: .status.results[0].lastChecked
+      name: CheckTime
+      type: date
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -51,9 +63,8 @@ spec:
                   (e.g., to match NetworkPolicies).
                 type: object
               probeImage:
-                default: nicolaka/netshoot:latest
-                description: ProbeImage is the container image used to run connectivity
-                  checks (must include nc and curl).
+                description: ProbeImage optionally overrides the operator's configured
+                  default image for connectivity checks.
                 type: string
               serviceAccountName:
                 description: ServiceAccountName is the optional ServiceAccount assigned
@@ -210,6 +221,12 @@ spec:
                   probe Job was created.
                 format: int64
                 type: integer
+              nonCompliantTargets:
+                description: NonCompliantTargets holds the names of targets whose
+                  observed access did not match the expectation.
+                items:
+                  type: string
+                type: array
               observedGeneration:
                 description: ObservedGeneration tracks the spec generation that produced
                   the current results.

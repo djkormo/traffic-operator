@@ -3,8 +3,13 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
+	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -16,20 +21,30 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	networkv1alpha1 "github.com/djkormo/traffic-operator/api/v1alpha1"
+	operatorconfig "github.com/djkormo/traffic-operator/internal/config"
 	"github.com/djkormo/traffic-operator/internal/controller"
 	"github.com/djkormo/traffic-operator/version"
 )
 
+const (
+	defaultProbeImageEnv = operatorconfig.ProbeImageConfigMapKey
+	configMapNameEnv     = "TRAFFIC_OPERATOR_CONFIGMAP_NAME"
+	podNamespaceEnv      = "POD_NAMESPACE"
+	helmReleaseNameEnv   = "HELM_RELEASE_NAME"
+)
+
 var (
-	scheme             = runtime.NewScheme()
-	setupLog           = ctrl.Log.WithName("setup")
-	getConfig          = ctrl.GetConfigOrDie
-	newClientset       = kubernetes.NewForConfig
-	setupReconciler    = defaultSetupReconciler
-	setupHealthChecks  = defaultSetupHealthChecks
-	setupSignalHandler = ctrl.SetupSignalHandler
-	startManager       = defaultStartManager
-	osExit             = os.Exit
+	scheme       = runtime.NewScheme()
+	setupLog     = ctrl.Log.WithName("setup")
+	getConfig    = ctrl.GetConfigOrDie
+	newClientset = func(cfg *rest.Config) (kubernetes.Interface, error) {
+		return kubernetes.NewForConfig(cfg)
+	}
+	setupReconciler    func(ctrl.Manager, kubernetes.Interface) error = defaultSetupReconciler
+	setupHealthChecks                                                 = defaultSetupHealthChecks
+	setupSignalHandler                                                = ctrl.SetupSignalHandler
+	startManager                                                      = defaultStartManager
+	osExit                                                            = os.Exit
 )
 
 func init() {
@@ -62,16 +77,94 @@ func parseFlags(flagSet *flag.FlagSet, args []string) (*Options, error) {
 	return opts, nil
 }
 
-func defaultSetupReconciler(mgr ctrl.Manager, clientset *kubernetes.Clientset) error {
+func defaultSetupReconciler(mgr ctrl.Manager, clientset kubernetes.Interface) error {
+	defaultProbeImage := strings.TrimSpace(os.Getenv(defaultProbeImageEnv))
+	if defaultProbeImage == "" {
+		defaultProbeImage = operatorconfig.DefaultProbeImage
+	}
+	configMapName := strings.TrimSpace(os.Getenv(configMapNameEnv))
+	if configMapName == "" {
+		configMapName = operatorconfig.DefaultProbeConfigMapName
+	}
+	namespace := strings.TrimSpace(os.Getenv(podNamespaceEnv))
+	if namespace == "" {
+		namespaceBytes, err := os.ReadFile(operatorconfig.ServiceAccountNamespacePath)
+		if err != nil {
+			return fmt.Errorf(
+				"determine operator namespace from %s or %s: %w",
+				podNamespaceEnv,
+				operatorconfig.ServiceAccountNamespacePath,
+				err,
+			)
+		}
+		namespace = strings.TrimSpace(string(namespaceBytes))
+		if namespace == "" {
+			return fmt.Errorf("operator namespace is empty in %s", operatorconfig.ServiceAccountNamespacePath)
+		}
+	}
+
+	defaultProbeImage, err := ensureProbeConfigMap(
+		context.Background(),
+		clientset,
+		namespace,
+		configMapName,
+		defaultProbeImage,
+		strings.TrimSpace(os.Getenv(helmReleaseNameEnv)),
+	)
+	if err != nil {
+		return err
+	}
+
 	if err := (&controller.TrafficCheckReconciler{
-		Client:    mgr.GetClient(),
-		Scheme:    mgr.GetScheme(),
-		Clientset: clientset,
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		Clientset:         clientset,
+		DefaultProbeImage: defaultProbeImage,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "TrafficCheck")
 		return err
 	}
 	return nil
+}
+
+func ensureProbeConfigMap(
+	ctx context.Context,
+	clientset kubernetes.Interface,
+	namespace, name, defaultImage, helmReleaseName string,
+) (string, error) {
+	configMaps := clientset.CoreV1().ConfigMaps(namespace)
+	configMap, err := configMaps.Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		labels := map[string]string{"app.kubernetes.io/managed-by": "traffic-operator"}
+		annotations := map[string]string{}
+		if helmReleaseName != "" {
+			labels["app.kubernetes.io/managed-by"] = "Helm"
+			labels["app.kubernetes.io/instance"] = helmReleaseName
+			annotations["meta.helm.sh/release-name"] = helmReleaseName
+			annotations["meta.helm.sh/release-namespace"] = namespace
+		}
+		configMap, err = configMaps.Create(ctx, &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        name,
+				Namespace:   namespace,
+				Labels:      labels,
+				Annotations: annotations,
+			},
+			Data: map[string]string{defaultProbeImageEnv: defaultImage},
+		}, metav1.CreateOptions{})
+		if apierrors.IsAlreadyExists(err) {
+			configMap, err = configMaps.Get(ctx, name, metav1.GetOptions{})
+		}
+	}
+	if err != nil {
+		return "", fmt.Errorf("get or create probe ConfigMap %s/%s: %w", namespace, name, err)
+	}
+
+	image := strings.TrimSpace(configMap.Data[defaultProbeImageEnv])
+	if image == "" {
+		return "", fmt.Errorf("probe ConfigMap %s/%s has no %s value", namespace, name, defaultProbeImageEnv)
+	}
+	return image, nil
 }
 
 func defaultSetupHealthChecks(mgr ctrl.Manager) error {
@@ -96,7 +189,7 @@ func setupManager(cfg *rest.Config, opts *Options) (ctrl.Manager, error) {
 		Metrics:                metricsserver.Options{BindAddress: opts.MetricsAddr},
 		HealthProbeBindAddress: opts.ProbeAddr,
 		LeaderElection:         opts.EnableLeaderElection,
-		LeaderElectionID:       "traffic-operator.example.com",
+		LeaderElectionID:       "network.traffic-operator.djkormo.github.io",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

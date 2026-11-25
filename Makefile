@@ -248,9 +248,11 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 
 .PHONY: helm-update-crds
 helm-update-crds: manifests ## Generate and update CRDs in the Helm chart from config/crd/bases.
-	@echo "Updating CRDs in charts/traffic-operator/crds/..."
-	mkdir -p charts/traffic-operator/crds
-	cp config/crd/bases/*.yaml charts/traffic-operator/crds/
+	@echo "Updating CRDs in charts/traffic-operator/templates/..."
+	@for crd in config/crd/bases/*.yaml; do \
+		{ printf '%s\n' '{{- if .Values.crds.enabled }}'; cat "$$crd"; printf '%s\n' '{{- end }}'; } \
+			> "charts/traffic-operator/templates/$$(basename "$$crd")"; \
+	done
 	@echo "CRDs successfully updated."
 
 .PHONY: helm-crds

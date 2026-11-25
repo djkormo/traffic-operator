@@ -117,8 +117,7 @@ type TrafficCheckSpec struct {
 	// +kubebuilder:validation:MinItems=1
 	Targets []TargetEndpoint `json:"targets"`
 
-	// ProbeImage is the container image used to run connectivity checks (must include nc and curl).
-	// +kubebuilder:default="nicolaka/netshoot:latest"
+	// ProbeImage optionally overrides the operator's configured default image for connectivity checks.
 	// +optional
 	ProbeImage string `json:"probeImage,omitempty"`
 
@@ -148,6 +147,9 @@ type TrafficCheckStatus struct {
 	// Results holds the connectivity outcome for each configured target.
 	Results []TargetResult `json:"results,omitempty"`
 
+	// NonCompliantTargets holds the names of targets whose observed access did not match the expectation.
+	NonCompliantTargets []string `json:"nonCompliantTargets,omitempty"`
+
 	// Conditions represent the latest available observations of the TrafficCheck state.
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
@@ -155,6 +157,10 @@ type TrafficCheckStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Ready",type="string",JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Reconciled",type="string",JSONPath=".status.conditions[?(@.type=='Reconciled')].status"
+// +kubebuilder:printcolumn:name="Namespace",type="string",JSONPath=".metadata.namespace"
+// +kubebuilder:printcolumn:name="NonCompliant",type="string",JSONPath=".status.nonCompliantTargets"
+// +kubebuilder:printcolumn:name="CheckTime",type="date",JSONPath=".status.results[0].lastChecked"
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
 
 type TrafficCheck struct {
