@@ -22,6 +22,10 @@ nameOverride: ""
 # -- Override the full chart name
 fullnameOverride: ""
 
+# -- Render the TrafficCheck CustomResourceDefinition as a Helm-managed resource
+crds:
+  enabled: true
+
 # -- Common labels to apply to all resources
 commonLabels: {}
 
@@ -69,6 +73,8 @@ leaderElection:
   enabled: true
 
 probe:
+  # -- Default image used for TrafficCheck probe jobs (overridden by spec.probeImage).
+  defaultImage: nicolaka/netshoot:latest
   # -- Enable health check probes
   enabled: true
   # -- Port for health probes (:8081)
