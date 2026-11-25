@@ -1,6 +1,6 @@
 # traffic-operator
 
-![Version: 0.4.0](https://img.shields.io/badge/Version-0.4.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.0.4](https://img.shields.io/badge/AppVersion-0.0.4-informational?style=flat-square)
+![Version: 0.5.0](https://img.shields.io/badge/Version-0.5.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: 0.0.5](https://img.shields.io/badge/AppVersion-0.0.5-informational?style=flat-square)
 
 A Helm chart for traffic-operator, a Kubernetes Operator for automated network connectivity validation
 
@@ -53,17 +53,23 @@ helm install traffic-operator ./charts/traffic-operator \
 
 ### Custom Resource Definitions (CRDs)
 
-Helm automatically installs CRDs located in the `crds/` directory during initial chart installation. If you manage CRDs separately or use GitOps tools such as ArgoCD, you can apply the CRD manually:
+The chart renders the TrafficCheck CRD as a Helm-managed resource, so it is included in `helm template` output and updated during upgrades. If you manage the CRD separately, apply it before installing the chart and set `crds.enabled: false`:
 
 ```bash
-kubectl apply -f charts/traffic-operator/crds/network.djkormo.github.io_trafficchecks.yaml
+kubectl apply -f config/crd/bases/network.djkormo.github.io_trafficchecks.yaml
+helm install traffic-operator ./charts/traffic-operator --set crds.enabled=false
 ```
+
+> [!WARNING]
+> Because the CRD is managed as a regular Helm resource, uninstalling the chart or disabling `crds.enabled` after installation can delete the CRD and all `TrafficCheck` resources. Back up or manage the CRD separately if you need to preserve those resources.
 
 ### Verify Installation
 
 ```bash
 kubectl get pods -n traffic-operator-system -l control-plane=controller-manager
 ```
+
+The chart stores the default probe-job image in a dedicated ConfigMap. Set `probe.defaultImage` in Helm values to change it; individual `TrafficCheck` resources can override it with `spec.probeImage`. If the ConfigMap is missing at startup, the operator recreates it with the configured default.
 
 ## Usage Example
 
@@ -117,10 +123,7 @@ helm uninstall traffic-operator --namespace traffic-operator-system
 ```
 
 > [!NOTE]
-> Custom Resource Definitions (CRDs) are not deleted by Helm on chart uninstallation to prevent accidental data loss. To remove them manually:
-> ```bash
-> kubectl delete crd trafficchecks.network.djkormo.github.io
-> ```
+> If `crds.enabled` is true (the default), uninstalling the chart removes the CRD and all `TrafficCheck` resources. To retain them, manage the CRD separately with `crds.enabled: false` before uninstalling.
 
 ## Values
 
@@ -133,6 +136,7 @@ helm uninstall traffic-operator --namespace traffic-operator-system
 | imagePullSecrets | list | `[]` | Image pull secrets for private container registries |
 | nameOverride | string | `""` | Override the chart name |
 | fullnameOverride | string | `""` | Override the full chart name |
+| crds | object | `{"enabled":true}` | Render the TrafficCheck CustomResourceDefinition as a Helm-managed resource |
 | commonLabels | object | `{}` | Common labels to apply to all resources |
 | deploymentAnnotations | object | `{}` | Annotations to apply to the Deployment |
 | podAnnotations | object | `{}` | Annotations to apply to operator pods |
@@ -146,6 +150,7 @@ helm uninstall traffic-operator --namespace traffic-operator-system
 | serviceAccount.annotations | object | `{}` | Annotations to add to the service account |
 | serviceAccount.name | string | `""` | The name of the service account to use. If not set and create is true, a name is generated using the fullname template |
 | leaderElection.enabled | bool | `true` | Enable leader election for the operator controller manager |
+| probe.defaultImage | string | `"nicolaka/netshoot:latest"` | Default image used for TrafficCheck probe jobs (overridden by spec.probeImage). |
 | probe.enabled | bool | `true` | Enable health check probes |
 | probe.port | int | `8081` | Port for health probes (:8081) |
 | livenessProbe | object | `{"httpGet":{"path":"/healthz","port":8081},"initialDelaySeconds":15,"periodSeconds":20}` | Liveness probe configuration |

@@ -36,6 +36,14 @@
     "fullnameOverride": {
       "type": "string"
     },
+    "crds": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
     "commonLabels": {
       "type": "object"
     },
@@ -89,6 +97,10 @@
     "probe": {
       "type": "object",
       "properties": {
+        "defaultImage": {
+          "type": "string",
+          "minLength": 1
+        },
         "enabled": {
           "type": "boolean"
         },

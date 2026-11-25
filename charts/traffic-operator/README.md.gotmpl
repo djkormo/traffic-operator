@@ -54,17 +54,23 @@ helm install traffic-operator ./charts/traffic-operator \
 
 ### Custom Resource Definitions (CRDs)
 
-Helm automatically installs CRDs located in the `crds/` directory during initial chart installation. If you manage CRDs separately or use GitOps tools such as ArgoCD, you can apply the CRD manually:
+The chart renders the TrafficCheck CRD as a Helm-managed resource, so it is included in `helm template` output and updated during upgrades. If you manage the CRD separately, apply it before installing the chart and set `crds.enabled: false`:
 
 ```bash
-kubectl apply -f charts/traffic-operator/crds/network.djkormo.github.io_trafficchecks.yaml
+kubectl apply -f config/crd/bases/network.djkormo.github.io_trafficchecks.yaml
+helm install traffic-operator ./charts/traffic-operator --set crds.enabled=false
 ```
+
+> [!WARNING]
+> Because the CRD is managed as a regular Helm resource, uninstalling the chart or disabling `crds.enabled` after installation can delete the CRD and all `TrafficCheck` resources. Back up or manage the CRD separately if you need to preserve those resources.
 
 ### Verify Installation
 
 ```bash
 kubectl get pods -n traffic-operator-system -l control-plane=controller-manager
 ```
+
+The chart stores the default probe-job image in a dedicated ConfigMap. Set `probe.defaultImage` in Helm values to change it; individual `TrafficCheck` resources can override it with `spec.probeImage`. If the ConfigMap is missing at startup, the operator recreates it with the configured default.
 
 ## Usage Example
 
@@ -118,10 +124,7 @@ helm uninstall traffic-operator --namespace traffic-operator-system
 ```
 
 > [!NOTE]
-> Custom Resource Definitions (CRDs) are not deleted by Helm on chart uninstallation to prevent accidental data loss. To remove them manually:
-> ```bash
-> kubectl delete crd trafficchecks.network.djkormo.github.io
-> ```
+> If `crds.enabled` is true (the default), uninstalling the chart removes the CRD and all `TrafficCheck` resources. To retain them, manage the CRD separately with `crds.enabled: false` before uninstalling.
 
 {{ template "chart.valuesSection" . }}
 
