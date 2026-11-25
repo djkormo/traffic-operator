@@ -1,6 +1,6 @@
 # traffic-operator
 
-> **Latest release: Helm chart `0.4.0` (appVersion `0.0.4`) — [release notes](#helm-chart-changelog)**
+> **Latest release: Helm chart `0.5.0` (appVersion `0.0.5`) — [release notes](#helm-chart-changelog)**
 
 
 `traffic-operator` is a Kubernetes operator designed to validate network connectivity and policy enforcement within a Kubernetes cluster and towards external endpoints.
@@ -51,7 +51,7 @@ It continuously reconciles `TrafficCheck` custom resources by orchestrating ephe
 The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-pages` branch) at:
 **`https://djkormo.github.io/traffic-operator`**
 
-> **Latest available chart version: `0.4.0`** (appVersion `0.0.4`)
+> **Latest available chart version: `0.5.0`** (appVersion `0.0.5`)
 
 ### Option 1: Install from GitHub Pages Repository (Recommended)
 
@@ -66,7 +66,7 @@ The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-
    helm search repo traffic-operator
    ```
 
-3. **Install the operator** (latest `0.4.0`):
+3. **Install the operator** (latest `0.5.0`):
    ```bash
    helm install traffic-operator traffic-operator/traffic-operator \
      --namespace traffic-operator-system \
@@ -78,7 +78,7 @@ The `traffic-operator` Helm chart is published and hosted via GitHub Pages (`gh-
    helm install traffic-operator traffic-operator/traffic-operator \
      --namespace traffic-operator-system \
      --create-namespace \
-     --version 0.4.0
+     --version 0.5.0
    ```
 
 5. **(Optional) Install or upgrade with custom values**:
@@ -107,6 +107,8 @@ kubectl get pods -n traffic-operator-system -l control-plane=controller-manager
 
 For full Helm chart configuration options and values reference, see the [Chart README](file:///mnt/c/development/kubernetes/traffic-operator/charts/traffic-operator/README.md).
 
+Chart 0.5.0 renders the TrafficCheck CRD as a Helm-managed resource. Set `crds.enabled=false` if you manage the CRD separately. Note that uninstalling the chart with CRD rendering enabled can delete the CRD and its `TrafficCheck` resources.
+
 ---
 
 ## Installation via Kustomize
@@ -114,7 +116,7 @@ For full Helm chart configuration options and values reference, see the [Chart R
 Alternatively, deploy using Kustomize:
 
 ```bash
-make deploy IMG=djkormo/traffic-operator:0.0.4
+make deploy IMG=djkormo/traffic-operator:0.0.5
 ```
 
 ---
@@ -217,7 +219,7 @@ You can reconcile the `TrafficCheck` resource through any of the following metho
 |---|---|
 | `make build` | Build the operator manager binary |
 | `make manifests` | Generate CRD and RBAC manifests |
-| `make helm-update-crds` | Regenerate and copy CRDs to `charts/traffic-operator/crds/` |
+| `make helm-update-crds` | Regenerate and copy CRDs to `charts/traffic-operator/templates/` |
 | `make helm-update-rbac` | Regenerate and update RBAC templates in `charts/traffic-operator/templates/` from `config/rbac/` |
 | `make helm-update` | Regenerate and update both CRDs and RBAC in the Helm chart |
 | `make helm-lint` | Lint the Helm chart |
@@ -228,6 +230,16 @@ You can reconcile the `TrafficCheck` resource through any of the following metho
 ---
 
 ## Helm Chart Changelog
+
+### 0.5.0 (2026-11-25)
+
+- **Operator appVersion**: `0.0.5`
+- Added the `probe.defaultImage` value and a ConfigMap for configuring the operator's default probe image.
+- Added ConfigMap access permissions and automatic operator pod rollout when the ConfigMap changes.
+- Moved the TrafficCheck CRD into Helm templates and added `crds.enabled` (default: `true`) so it is included in rendered manifests and managed during upgrades.
+- Added the `CheckTime` kubectl printer column for the most recent probe result.
+- **Upgrade note**: Existing releases may need to adopt the already-installed CRD. Uninstalling the chart while `crds.enabled` is true can delete the CRD and its `TrafficCheck` resources; set `crds.enabled: false` when managing the CRD separately.
+- Download: [`traffic-operator-0.5.0.tgz`](https://github.com/djkormo/traffic-operator/releases/download/traffic-operator-0.5.0/traffic-operator-0.5.0.tgz)
 
 ### 0.4.0 (2026-11-22)
 
